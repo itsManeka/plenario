@@ -1,0 +1,12 @@
+{
+  "name": "plenario",
+  "private": true,
+  "workspaces": ["packages/*", "apps/*"],
+  "scripts": {
+    "db:push": "cd packages/core && bun run db:push",
+    "ingest": "cd apps/ingest && bun run start",
+    "dev:api": "cd apps/api && bun run dev",
+    "dev:web": "cd apps/web && bun run dev",
+    "typecheck": "bun run --filter '*' typecheck"
+  }
+}

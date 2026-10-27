@@ -1,0 +1,13 @@
+{
+  "name": "@plenario/api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --env-file=../../.env --watch src/index.ts",
+    "start": "bun --env-file=../../.env src/index.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": { "@plenario/core": "workspace:*", "drizzle-orm": "^0.44.0", "hono": "^4.7.0" },
+  "devDependencies": { "typescript": "^5.8.0", "@types/bun": "latest" }
+}

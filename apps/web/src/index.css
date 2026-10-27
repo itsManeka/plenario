@@ -1,0 +1,104 @@
+@import "tailwindcss";
+
+/*
+ * Tokens. Paleta deliberadamente neutra: nenhuma cor remete a partido, e Sim/Não
+ * nunca dependem de cor (texto + ícone). O único acento é o azul de link/foco.
+ * As utilities do Tailwind leem var(--color-*), então trocar as variáveis no
+ * tema escuro basta.
+ */
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    "Noto Sans", Arial, sans-serif;
+  --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
+
+  --color-bg: #f6f6f3;
+  --color-surface: #ffffff;
+  --color-sunken: #efefeb;
+  --color-ink: #1a1d21;
+  --color-ink-2: #3a3f46;
+  --color-muted: #5a616b;
+  --color-line: #dedfdb;
+  --color-line-strong: #c4c6c1;
+  --color-accent: #1f4f9a;
+  --color-accent-ink: #ffffff;
+  --color-accent-soft: #e6edf8;
+  --color-focus: #1f4f9a;
+  --color-warn-soft: #f6efdc;
+  --color-warn-ink: #5c4508;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #111317;
+    --color-surface: #181b20;
+    --color-sunken: #0c0e11;
+    --color-ink: #e9eaec;
+    --color-ink-2: #c9ccd1;
+    --color-muted: #9da3ad;
+    --color-line: #2a2e35;
+    --color-line-strong: #3b4049;
+    --color-accent: #8db4f2;
+    --color-accent-ink: #0d1726;
+    --color-accent-soft: #1b2638;
+    --color-focus: #8db4f2;
+    --color-warn-soft: #2d2615;
+    --color-warn-ink: #ecd9a4;
+  }
+}
+
+@layer base {
+  html {
+    color-scheme: light dark;
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    background: var(--color-bg);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.5;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  ::selection {
+    background: var(--color-accent-soft);
+  }
+}
+
+@layer components {
+  /* Card inteiro clicável sem aninhar links: o link principal estica um ::after
+     sobre o card, e os demais links ficam acima dele. */
+  .stretched::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+  }
+  .above-stretch {
+    position: relative;
+    z-index: 1;
+  }
+
+  .skeleton {
+    background: var(--color-sunken);
+    border-radius: 4px;
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .skeleton {
+      animation: none;
+    }
+  }
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.55;
+  }
+}

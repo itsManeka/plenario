@@ -1,0 +1,25 @@
+# Contribuindo
+
+Obrigado pelo interesse. Algumas regras para o projeto continuar confiável:
+
+## Princípios
+
+1. **Só fato com fonte.** Nada de nota, ranking ou adjetivo sobre voto ou parlamentar. Se a
+   métrica nova envolve juízo de valor, abra uma issue para discutir antes do código.
+2. **Neutralidade visual.** Nenhuma cor de partido. Informação nunca só por cor.
+3. **Bom vizinho das fontes.** Carga pesada usa os arquivos em lote; chamadas à API passam por
+   `apps/ingest/src/http.ts` (concorrência baixa, backoff).
+4. **Sem dado pessoal de usuário** enquanto não houver uma decisão explícita sobre contas.
+
+## Fluxo
+
+- Abra uma issue descrevendo o problema ou a ideia antes de PR grande.
+- Um PR por assunto. Rode `bun run typecheck` antes de abrir.
+- Mudança em `packages/core` (schema do banco ou contrato HTTP) afeta todo mundo: descreva no
+  PR o que muda para o ingest, a API e a web.
+
+## Boas primeiras tarefas
+
+- Nova fonte: despesas do Senado (CEAPS), discursos, presença em comissões.
+- Assembleias estaduais e câmaras municipais (cada uma é um adaptador novo em `apps/ingest`).
+- Acessibilidade e performance do front.

@@ -1,0 +1,11 @@
+{
+  "name": "@plenario/ingest",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun --env-file=../../.env src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": { "@plenario/core": "workspace:*", "drizzle-orm": "^0.44.0" },
+  "devDependencies": { "typescript": "^5.8.0", "@types/bun": "latest" }
+}
