@@ -87,6 +87,16 @@ function descreverErro(e: unknown): string {
   return `${nome}: ${(i >= 0 ? msg.slice(0, i) : msg).slice(0, MAX_MSG_ERRO)}`;
 }
 
+/** Excecao da gravacao (`db.transaction`): conta em `falhas` mas nao vira `falha_leitura` (a leitura estava ok). */
+class ErroGravacao extends Error {
+  readonly causa: unknown;
+  constructor(causa: unknown) {
+    super("erro de gravacao");
+    this.name = "ErroGravacao";
+    this.causa = causa;
+  }
+}
+
 /**
  * `parcial` (opcional) e preenchido durante a rodada: se o sync lancar, quem chama ainda tem os pulos
  * e contadores ja registrados para gravar no cursor.
@@ -229,6 +239,8 @@ export async function sincronizarConsultas(parcial?: { atual?: ResultadoConsulta
                 })
                 .returning({ id: schema.evento.id });
               return { gravou: true, evento: novos.length };
+            }).catch((e: unknown): never => {
+              throw new ErroGravacao(e);
             });
             if (resultado.gravou) {
               lidas++;
@@ -241,8 +253,13 @@ export async function sincronizarConsultas(parcial?: { atual?: ResultadoConsulta
         }
       }
     } catch (e) {
-      desfecho = falhar(c.idExterno, descreverErro(e));
-      registrar(c.idExterno, "falha_leitura");
+      if (e instanceof ErroGravacao) {
+        // erro de gravacao nao e falha de leitura: conta em falhas, sem entrar no mapa de puladas
+        desfecho = falhar(c.idExterno, descreverErro(e.causa));
+      } else {
+        desfecho = falhar(c.idExterno, descreverErro(e));
+        registrar(c.idExterno, "falha_leitura");
+      }
     }
     seguidas = proximaContagemFalhas(seguidas, desfecho);
     abortou = deveAbortar(seguidas);

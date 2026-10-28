@@ -39,61 +39,116 @@ function gravarConsultas(rc: ResultadoConsultas): Promise<void> {
   });
 }
 
-export async function run(opcoes: OpcoesIngest): Promise<void> {
+/** Fontes de rede do run; injetaveis para teste (default: as reais). */
+export type Fontes = {
+  sincronizarParlamentares: typeof sincronizarParlamentares;
+  completarPartidos: typeof completarPartidos;
+  sincronizarVotacoes: typeof sincronizarVotacoes;
+  sincronizarProposicoes: typeof sincronizarProposicoes;
+  sincronizarConsultas: typeof sincronizarConsultas;
+};
+
+export const FONTES: Fontes = {
+  sincronizarParlamentares,
+  completarPartidos,
+  sincronizarVotacoes,
+  sincronizarProposicoes,
+  sincronizarConsultas,
+};
+
+function nomeErro(e: unknown): string {
+  return e instanceof Error ? e.name : "erro";
+}
+
+export async function run(opcoes: OpcoesIngest, fontes: Fontes = FONTES): Promise<void> {
   const t0 = performance.now();
   const hoje = hojeBrasilia();
   const ate = opcoes.ate ? validarData(opcoes.ate, "ate") : hoje;
 
-  const senadores = await sincronizarParlamentares();
-  await gravarCursor("senado:parlamentares", { total: senadores.size });
+  // Cada fonte roda em bloco proprio: falha de uma nao derruba as outras (so as que dependem dela).
+  const erros: { fonte: string; erro: unknown }[] = [];
+  const falhou = (fonte: string, erro: unknown): void => {
+    erros.push({ fonte, erro });
+    log(`${fonte}: FALHOU (${nomeErro(erro)}: ${erro instanceof Error ? erro.message : String(erro)})`);
+  };
 
-  const desdeVot = await inicio("senado:votacoes", opcoes);
-  if (desdeVot <= ate) {
-    log(`votações de ${desdeVot} a ${ate}`);
-    const rv = await sincronizarVotacoes(desdeVot, ate, senadores);
-    await completarPartidos();
-    await gravarCursor("senado:votacoes", { ate });
-    log(
-      `votações: ${rv.votacoes} (${rv.nominais} nominais, ${rv.secretas} secretas sem voto individual), ${rv.votos} votos`,
-    );
-  } else {
-    log(`votações: nada a fazer (desde ${desdeVot} > até ${ate})`);
+  let senadores: Awaited<ReturnType<typeof sincronizarParlamentares>> | undefined;
+  try {
+    senadores = await fontes.sincronizarParlamentares();
+    await gravarCursor("senado:parlamentares", { total: senadores.size });
+  } catch (e) {
+    senadores = undefined;
+    falhou("parlamentares", e);
   }
 
-  const desdeProp = await inicio("senado:proposicoes", opcoes);
-  if (desdeProp <= ate) {
-    log(`proposições de ${desdeProp} a ${ate}`);
-    const rp = await sincronizarProposicoes(desdeProp, ate, senadores);
-    await gravarCursor("senado:proposicoes", { ate });
-    log(
-      `proposições: ${rp.proposicoes} com ${rp.autorias} autorias` +
-        (rp.semOrdem ? ` (${rp.semOrdem} sem ordem: nome não achado no texto de autoria)` : ""),
-    );
+  if (!senadores) {
+    log("votações: pulada (parlamentares falhou; o mapa de senadores não está disponível)");
+    log("proposições: pulada (parlamentares falhou; o mapa de senadores não está disponível)");
   } else {
-    log(`proposições: nada a fazer (desde ${desdeProp} > até ${ate})`);
+    try {
+      const desdeVot = await inicio("senado:votacoes", opcoes);
+      if (desdeVot <= ate) {
+        log(`votações de ${desdeVot} a ${ate}`);
+        const rv = await fontes.sincronizarVotacoes(desdeVot, ate, senadores);
+        await fontes.completarPartidos();
+        await gravarCursor("senado:votacoes", { ate });
+        log(
+          `votações: ${rv.votacoes} (${rv.nominais} nominais, ${rv.secretas} secretas sem voto individual), ${rv.votos} votos`,
+        );
+      } else {
+        log(`votações: nada a fazer (desde ${desdeVot} > até ${ate})`);
+      }
+    } catch (e) {
+      falhou("votacoes", e);
+    }
+
+    try {
+      const desdeProp = await inicio("senado:proposicoes", opcoes);
+      if (desdeProp <= ate) {
+        log(`proposições de ${desdeProp} a ${ate}`);
+        const rp = await fontes.sincronizarProposicoes(desdeProp, ate, senadores);
+        await gravarCursor("senado:proposicoes", { ate });
+        log(
+          `proposições: ${rp.proposicoes} com ${rp.autorias} autorias` +
+            (rp.semOrdem ? ` (${rp.semOrdem} sem ordem: nome não achado no texto de autoria)` : ""),
+        );
+      } else {
+        log(`proposições: nada a fazer (desde ${desdeProp} > até ${ate})`);
+      }
+    } catch (e) {
+      falhou("proposicoes", e);
+    }
   }
 
   // `parcial` guarda o que o sync ja registrou: se ele lancar, os pulos da rodada nao se perdem.
   const parcial: { atual?: ResultadoConsultas } = {};
-  let rc: ResultadoConsultas;
   try {
-    rc = await sincronizarConsultas(parcial);
+    const rc = await fontes.sincronizarConsultas(parcial);
+    await gravarConsultas(rc);
+    log(
+      `consultas: ${rc.lidas} lidas, ${rc.puladas} puladas, ${rc.eventos} eventos` +
+        (rc.falhas ? `, ${rc.falhas} falhas` : "") +
+        (rc.abortou ? " (rodada abortada: falhas seguidas)" : ""),
+    );
   } catch (e) {
     if (parcial.atual) {
       try {
         await gravarConsultas(parcial.atual);
       } catch (eCursor) {
-        log(`consultas: falha ao gravar o cursor parcial (${eCursor instanceof Error ? eCursor.name : "erro"})`);
+        log(`consultas: falha ao gravar o cursor parcial (${nomeErro(eCursor)})`);
       }
     }
-    throw e;
+    falhou("consultas", e);
   }
-  await gravarConsultas(rc);
-  log(
-    `consultas: ${rc.lidas} lidas, ${rc.puladas} puladas, ${rc.eventos} eventos` +
-      (rc.falhas ? `, ${rc.falhas} falhas` : "") +
-      (rc.abortou ? " (rodada abortada: falhas seguidas)" : ""),
-  );
 
   log(`concluído em ${((performance.now() - t0) / 1000).toFixed(1)}s`);
+  if (erros.length) log(`fontes com falha: ${erros.map((x) => x.fonte).join(", ")}`);
+
+  if (erros.length === 1) throw erros[0]!.erro;
+  if (erros.length > 1) {
+    throw new AggregateError(
+      erros.map((x) => x.erro),
+      `fontes do Senado com falha: ${erros.map((x) => x.fonte).join(", ")}`,
+    );
+  }
 }
