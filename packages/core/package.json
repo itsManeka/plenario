@@ -6,7 +6,8 @@
     "./schema": "./src/schema.ts",
     "./api": "./src/api.ts",
     "./db": "./src/db.ts",
-    "./texto": "./src/texto.ts"
+    "./texto": "./src/texto.ts",
+    "./estatico": "./src/estatico.ts"
   },
   "scripts": {
     "db:push": "drizzle-kit push && psql \"${DATABASE_URL:-postgres://localhost:5432/plenario}\" -f sql/extra.sql",

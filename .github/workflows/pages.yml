@@ -1,0 +1,222 @@
+# Atualiza os dados e publica o site estático no GitHub Pages, sem servidor.
+#
+# Desenho:
+#   - O banco não mora em lugar nenhum: a cada execução um Postgres 16 descartável sobe como
+#     serviço e é restaurado do dump da última execução bem-sucedida (actions/cache). Assim o
+#     ingest roda só o incremental e não baixa a legislatura inteira das fontes todo dia.
+#     Sem dump (primeira vez, cache expirado ou `carga_completa`), faz a carga completa.
+#   - Agendado (06:00 UTC) e manual: restaura, roda o ingest, salva o dump novo, exporta os
+#     JSON, monta o site e publica.
+#   - Push na main: só reexporta e republica a partir do último dump (o código do site ou do
+#     export mudou, os dados não). Se ainda não existe dump, faz a carga completa.
+#   - Falha no ingest não publica: o site fica com os dados da última publicação. O dump é
+#     salvo mesmo assim se alguma casa terminou, porque cada fonte só avança o próprio cursor
+#     quando termina e todo upsert é idempotente: o progresso feito não precisa ser refeito.
+#   - Os arquivos em lote da Câmara não são guardados em cache: com o banco restaurado, o
+#     ingest compara o etag remoto (HEAD) com o que já processou e só baixa o que mudou, ou
+#     seja, os arquivos do ano corrente que a Câmara regera de madrugada (~150 MB por dia).
+#
+# Tamanhos medidos (out/2026, Câmara + Senado da 57ª): banco ~750 MB, dump `-Fc` ~37 MB,
+# restauração ~25 s. Uma entrada de cache por execução, então o limite de 10 GB por
+# repositório dá folga de meses; entradas sem acesso há 7 dias o GitHub apaga sozinho.
+
+name: Dados e site
+
+on:
+  schedule:
+    - cron: "0 6 * * *" # 03:00 em Brasília; a Câmara regera os arquivos entre 04h e 08h UTC
+  workflow_dispatch:
+    inputs:
+      carga_completa:
+        description: "Ignorar o dump salvo e refazer a carga completa da legislatura"
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Um de cada vez: dois ingests concorrentes salvariam dumps divergentes, e dois deploys de
+# Pages se atropelam. O que chega durante uma execução espera (não cancela a que está rodando).
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  dados:
+    runs-on: ubuntu-24.04 # traz psql 16 (o db:push usa psql no host)
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:16 # já traz pg_trgm e unaccent (contrib)
+        env:
+          POSTGRES_USER: plenario
+          POSTGRES_PASSWORD: plenario
+          POSTGRES_DB: plenario
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U plenario -d plenario"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://plenario:plenario@localhost:5432/plenario
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.12
+
+      - name: Dependências
+        run: bun install --frozen-lockfile
+
+      - name: Restaurar dump do banco
+        id: dump
+        if: ${{ !inputs.carga_completa }}
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/pgdump
+          key: pgdump-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: pgdump-
+
+      - name: Carregar dump no Postgres
+        if: ${{ steps.dump.outputs.cache-matched-key != '' }}
+        env:
+          PG_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          ls -lh "$RUNNER_TEMP/pgdump/plenario.dump"
+          # pg_restore do próprio container: mesma versão do servidor, sem depender do cliente do runner
+          docker exec -i "$PG_CONTAINER" pg_restore --no-owner --no-acl -U plenario -d plenario \
+            < "$RUNNER_TEMP/pgdump/plenario.dump"
+          echo "Restaurado de \`${{ steps.dump.outputs.cache-matched-key }}\`" >> "$GITHUB_STEP_SUMMARY"
+
+      # Depois da restauração: aplica mudança aditiva de contrato que tenha entrado desde o dump.
+      - name: Schema (db:push)
+        run: bun run db:push
+
+      - name: Decidir se roda o ingest
+        id: modo
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] && [ -n "${{ steps.dump.outputs.cache-matched-key }}" ]; then
+            echo "ingest=false" >> "$GITHUB_OUTPUT"
+            echo "Push na main: só reexporta a partir do último dump, sem ingest." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "ingest=true" >> "$GITHUB_OUTPUT"
+            if [ -z "${{ steps.dump.outputs.cache-matched-key }}" ]; then
+              echo "Sem dump salvo: carga completa da legislatura." >> "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
+
+      # Uma nova tentativa por casa: as fontes devolvem 503 de vez em quando e o ingest é
+      # idempotente, então repetir é seguro.
+      - name: Ingest Câmara
+        id: camara
+        if: ${{ steps.modo.outputs.ingest == 'true' }}
+        run: |
+          for tentativa in 1 2; do
+            bun run ingest camara && exit 0
+            [ "$tentativa" = 2 ] && exit 1
+            echo "::warning::ingest da Câmara falhou, nova tentativa em 2 min"
+            sleep 120
+          done
+
+      - name: Ingest Senado
+        id: senado
+        if: ${{ !cancelled() && steps.modo.outputs.ingest == 'true' }}
+        run: |
+          for tentativa in 1 2; do
+            bun run ingest senado && exit 0
+            [ "$tentativa" = 2 ] && exit 1
+            echo "::warning::ingest do Senado falhou, nova tentativa em 2 min"
+            sleep 120
+          done
+
+      - name: Gerar dump
+        id: gerar_dump
+        if: ${{ !cancelled() && (steps.camara.outcome == 'success' || steps.senado.outcome == 'success') }}
+        env:
+          PG_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/pgdump"
+          docker exec "$PG_CONTAINER" pg_dump -Fc -U plenario -d plenario > "$RUNNER_TEMP/pgdump/plenario.dump"
+          ls -lh "$RUNNER_TEMP/pgdump/plenario.dump"
+          echo "Dump salvo: $(du -h "$RUNNER_TEMP/pgdump/plenario.dump" | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Salvar dump no cache
+        if: ${{ !cancelled() && steps.gerar_dump.outcome == 'success' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/pgdump
+          key: pgdump-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Resumo do banco
+        if: ${{ !cancelled() }}
+        run: |
+          {
+            echo "### Banco"
+            echo
+            echo "| casa | parlamentares | votações nominais | votos | proposições | despesas | eventos | último evento |"
+            echo "|---|---:|---:|---:|---:|---:|---:|---|"
+            psql "$DATABASE_URL" -At -F ' | ' -c "
+              select c.casa,
+                (select count(*) from parlamentar where casa::text = c.casa),
+                (select count(*) from votacao where casa::text = c.casa and nominal),
+                (select count(*) from voto where votacao_id like c.casa || ':%'),
+                (select count(*) from proposicao where casa::text = c.casa),
+                (select count(*) from despesa where id like c.casa || ':%'),
+                (select count(*) from evento where parlamentar_id like c.casa || ':%'),
+                (select to_char(max(ocorrido_em) at time zone 'America/Sao_Paulo', 'YYYY-MM-DD HH24:MI')
+                   from evento where parlamentar_id like c.casa || ':%')
+              from (values ('camara'), ('senado')) c(casa)" | sed 's/^/| /; s/$/ |/'
+            echo
+            echo "<details><summary>Cursores do ingest</summary>"
+            echo
+            echo '```'
+            psql "$DATABASE_URL" -At -c "select fonte || '  ' || to_char(ultimo_sync at time zone 'UTC', 'YYYY-MM-DD HH24:MI') || 'Z  ' || coalesce(estado->>'ultimaData', estado->>'ate', '') from ingest_cursor order by fonte"
+            echo '```'
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Exportar JSON
+        run: bun run export
+
+      - name: Montar site
+        working-directory: apps/web
+        run: bun run build:pages
+
+      - name: Resumo da publicação
+        run: |
+          meta=apps/web/dist/data/meta.json
+          [ -f "$meta" ] || meta=apps/web/public/data/meta.json
+          {
+            echo "### Site"
+            echo
+            echo "- dadosAte: \`$(jq -r .dadosAte "$meta")\`"
+            echo "- geradoEm: \`$(jq -r .geradoEm "$meta")\`"
+            echo "- tamanho: $(du -sh apps/web/dist | cut -f1), $(find apps/web/dist -type f | wc -l) arquivos"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/web/dist
+
+      - name: Aviso de falha
+        if: ${{ failure() }}
+        run: |
+          echo "**Falhou: nada foi publicado; o site continua com os dados da última publicação.**" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    needs: dados
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

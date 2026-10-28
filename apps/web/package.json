@@ -4,8 +4,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:estatico": "VITE_DADOS=estatico vite",
     "build": "tsc --noEmit && vite build",
+    "build:pages": "tsc --noEmit && VITE_DADOS=estatico VITE_BASE=/plenario/ vite build",
     "preview": "vite preview",
+    "preview:pages": "VITE_BASE=/plenario/ vite preview",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

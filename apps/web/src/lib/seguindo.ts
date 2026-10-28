@@ -164,7 +164,7 @@ export function idsDoParametro(valor: string): string[] {
 }
 
 export function linkCompartilhavel(ids: string[]): string {
-  const base = `${window.location.origin}/seguindo`;
+  const base = `${window.location.origin}${import.meta.env.BASE_URL}seguindo`;
   // vírgula e dois-pontos ficam legíveis na URL
   return `${base}?seguir=${ids.map(encodeURIComponent).join(",").replace(/%3A/gi, ":")}`;
 }

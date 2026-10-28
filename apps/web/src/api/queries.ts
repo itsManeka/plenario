@@ -89,3 +89,11 @@ export function useHealth() {
     retry: false,
   });
 }
+
+export function useInfoDados() {
+  return useQuery({
+    queryKey: ["info-dados"],
+    queryFn: ({ signal }) => api.infoDados(signal),
+    staleTime: 10 * 60_000,
+  });
+}

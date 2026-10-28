@@ -158,7 +158,8 @@ export function plural(n: number, um: string, varios: string): string {
 
 /** "COMBUSTÍVEIS E LUBRIFICANTES." (como vem da CEAP) -> "Combustíveis e lubrificantes". */
 export function categoriaDespesa(s: string): string {
-  const t = s.trim().replace(/\.+$/, "");
+  // a fonte traz espaço antes da vírgula ("Hospedagem ,exceto..."): normaliza a pontuação
+  const t = s.trim().replace(/\.+$/, "").replace(/\s*,\s*/g, ", ");
   if (t !== t.toLocaleUpperCase("pt-BR")) return t;
   const baixo = t.toLocaleLowerCase("pt-BR");
   return baixo.charAt(0).toLocaleUpperCase("pt-BR") + baixo.slice(1);
@@ -218,4 +219,12 @@ export function notaQuorum(
   if (v.aprovada === maioriaSimples) return null;
   const casa = v.casa === "camara" ? "na Câmara" : "no Senado";
   return `Exige maioria qualificada (${sigla} ${casa}: ${num(QUORUM[v.casa][sigla])} votos sim)`;
+}
+
+/** Desde agosto de 2025 os dados abertos da Câmara não trazem passagens aéreas. */
+export const NOTA_PASSAGEM =
+  "Não inclui passagens aéreas: a Câmara deixou de publicá-las nos dados abertos em agosto de 2025.";
+
+export function semPassagemAerea(casa: Casa, ano: number, mes = 12): boolean {
+  return casa === "camara" && ano * 100 + mes >= 202508;
 }

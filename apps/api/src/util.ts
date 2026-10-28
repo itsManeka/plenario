@@ -190,3 +190,33 @@ export function urlOficialParlamentar(casa: Casa, idExterno: string): string {
     ? `https://www.camara.leg.br/deputados/${idExterno}`
     : `https://www25.senado.leg.br/web/senadores/senador/-/perfil/${idExterno}`;
 }
+
+// ---- regras dos cards do feed, compartilhadas com apps/export ----
+
+// urlFonte nunca é nula: cai da página mais específica para a mais geral (perfil do parlamentar)
+export function urlFonteVoto(votacao: VotacaoResumo, perfil: string): string {
+  return votacao.urlOficial ?? votacao.proposicao?.url ?? perfil;
+}
+
+export function urlFonteProposicao(proposicao: ProposicaoResumo, perfil: string): string {
+  return proposicao.url ?? perfil;
+}
+
+// Senado não tem despesa no v1; se vier, o perfil é a página mais específica que há
+export function urlFonteDespesa(casa: Casa, idExterno: string | undefined, ano: number, mes: number, perfil: string): string {
+  return casa === "camara" && idExterno ? urlCotaCamara(idExterno, ano, mes) : perfil;
+}
+
+// primeiro signatário = autor; sem ordem na fonte, autor único também é autor
+export function papelAutoria(a: { ordem: number | null; n_autores: number } | undefined): "autor" | "coautor" {
+  return a && (a.ordem === 1 || (a.ordem === null && a.n_autores === 1)) ? "autor" : "coautor";
+}
+
+export function resumoDespesa(cats: { categoria: string; valor: number }[]): {
+  total: number;
+  porCategoria: { categoria: string; valor: number }[];
+} {
+  const ordenadas = [...cats].sort((x, y) => y.valor - x.valor || x.categoria.localeCompare(y.categoria));
+  const total = Math.round(ordenadas.reduce((s, c) => s + c.valor, 0) * 100) / 100;
+  return { total, porCategoria: ordenadas.slice(0, 5) };
+}

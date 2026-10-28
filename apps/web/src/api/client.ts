@@ -11,22 +11,19 @@ import type {
   Casa,
 } from "@plenario/core/api";
 
-// Cliente fino sobre o contrato de @plenario/core/api. Em dev, /api passa pelo proxy
-// do Vite até apps/api (:8787). VITE_API_URL troca a base (ex.: produção).
-// VITE_MOCK=1 responde com fixtures em memória, sem rede.
+import { ApiError } from "./erro";
+import { fonteEstatica } from "./estatico";
+
+// Camada de dados. Três fontes com a mesma interface, escolhidas no build:
+// - API (padrão): /api passa pelo proxy do Vite até apps/api (:8787); VITE_API_URL troca a base.
+// - VITE_MOCK=1: fixtures em memória, sem rede (só para desenvolver o front).
+// - VITE_DADOS=estatico: arquivos JSON gerados por apps/export (GitHub Pages), ver estatico.ts.
 
 const BASE = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "") ?? "/api";
-export const MOCK = import.meta.env.VITE_MOCK === "1";
+export const ESTATICO = import.meta.env.VITE_DADOS === "estatico";
+export const MOCK = !ESTATICO && import.meta.env.VITE_MOCK === "1";
 
-export class ApiError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-  ) {
-    super(message);
-    this.name = "ApiError";
-  }
-}
+export { ApiError };
 
 type Params = Record<string, string | number | undefined | null>;
 
@@ -74,8 +71,19 @@ export interface FiltroParlamentares {
   uf?: string;
 }
 
-export const api = {
+/** Data dos dados exibida no "Sobre". `geradoEm` só existe no modo estático. */
+export interface InfoDados {
+  dadosAte: string | null;
+  geradoEm: string | null;
+}
+
+const apiHttp = {
   health: (signal?: AbortSignal) => get<Health>("/health", undefined, signal),
+
+  infoDados: async (signal?: AbortSignal): Promise<InfoDados> => {
+    const h = await get<Health>("/health", undefined, signal);
+    return { dadosAte: h.dadosAte, geradoEm: null };
+  },
 
   parlamentares: (f: FiltroParlamentares, cursor?: string | null, signal?: AbortSignal) =>
     get<Pagina<ParlamentarResumo>>(
@@ -124,3 +132,7 @@ export const api = {
   partidos: (signal?: AbortSignal) =>
     get<PartidoResumo[]>("/partidos", undefined, signal),
 };
+
+export type Fonte = typeof apiHttp;
+
+export const api: Fonte = ESTATICO ? fonteEstatica : apiHttp;

@@ -1,10 +1,11 @@
 import type { Parlamentar } from "@plenario/core/api";
 import { useParams } from "react-router";
+import { idDaUrl } from "../lib/ids";
 import { useFeedParlamentar, useParlamentar } from "../api/queries";
 import { FeedLista, FiltroTipoChips, useFiltroTipo, VazioFiltro } from "../components/FeedLista";
 import { Topo } from "../components/Layout";
 import { Avatar, EstadoErro, EstadoVazio, Etiqueta, FonteLink, Linha, SeguirBotao } from "../components/ui";
-import { brlInteiro, CASA_CARGO, num, partidoUf, pct } from "../lib/format";
+import { brlInteiro, CASA_CARGO, NOTA_PASSAGEM, num, partidoUf, pct, semPassagemAerea } from "../lib/format";
 
 function Estatistica({ rotulo, valor, nota }: { rotulo: string; valor: string; nota?: string }) {
   return (
@@ -19,6 +20,7 @@ function Estatistica({ rotulo, valor, nota }: { rotulo: string; valor: string; n
 function Cabecalho({ p }: { p: Parlamentar }) {
   const e = p.estatisticas;
   const ano = new Date().getFullYear();
+  const semPassagem = e.despesasAnoCorrente !== null && semPassagemAerea(p.casa, ano);
   return (
     <section aria-label="Dados do parlamentar" className="border-b border-line px-4 pt-5 pb-4">
       <div className="flex items-start gap-4">
@@ -62,11 +64,17 @@ function Cabecalho({ p }: { p: Parlamentar }) {
         />
         <Estatistica rotulo="Proposições" valor={num(e.proposicoesAutor)} nota="como autor(a)" />
         <Estatistica
-          rotulo={`Cota parlamentar ${ano}`}
+          rotulo={`Cota parlamentar ${ano}${semPassagem ? " *" : ""}`}
           valor={e.despesasAnoCorrente === null ? "—" : brlInteiro(e.despesasAnoCorrente)}
           nota={e.despesasAnoCorrente === null ? "sem dados do Senado ainda" : "gasto no ano"}
         />
       </dl>
+      {semPassagem && (
+        <p id="nota-cota" className="mt-2 text-xs leading-4 text-muted">
+          <span aria-hidden="true">* </span>
+          {NOTA_PASSAGEM}
+        </p>
+      )}
     </section>
   );
 }
@@ -115,7 +123,7 @@ function FeedDoParlamentar({ id }: { id: string }) {
 }
 
 export function Perfil() {
-  const { id = "" } = useParams();
+  const id = idDaUrl(useParams().id);
   const q = useParlamentar(id);
 
   return (

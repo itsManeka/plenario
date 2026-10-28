@@ -16,6 +16,18 @@
         "typescript": "^5.8.0",
       },
     },
+    "apps/export": {
+      "name": "@plenario/export",
+      "dependencies": {
+        "@plenario/api": "workspace:*",
+        "@plenario/core": "workspace:*",
+        "drizzle-orm": "^0.44.0",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "typescript": "^5.8.0",
+      },
+    },
     "apps/ingest": {
       "name": "@plenario/ingest",
       "dependencies": {
@@ -171,6 +183,8 @@
     "@plenario/api": ["@plenario/api@workspace:apps/api"],
 
     "@plenario/core": ["@plenario/core@workspace:packages/core"],
+
+    "@plenario/export": ["@plenario/export@workspace:apps/export"],
 
     "@plenario/ingest": ["@plenario/ingest@workspace:apps/ingest"],
 

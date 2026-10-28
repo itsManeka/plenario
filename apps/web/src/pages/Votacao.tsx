@@ -1,6 +1,7 @@
 import type { VotacaoDetalhe, VotoTipo } from "@plenario/core/api";
 import { useDeferredValue, useId, useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
+import { idDaUrl } from "../lib/ids";
 import { useVotacao } from "../api/queries";
 import { hrefParlamentar, hrefProposicao } from "../components/FeedCard";
 import { IconeBusca, IconeNao, IconeSim } from "../components/Icones";
@@ -207,7 +208,7 @@ function Skeleton() {
 }
 
 export function Votacao() {
-  const { id = "" } = useParams();
+  const id = idDaUrl(useParams().id);
   const q = useVotacao(id);
 
   if (q.isPending)

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { sql } from "@plenario/core/db";
-import { baixar, bytesDoZip, lerDados } from "./arquivos";
+import { baixar, bytesDoZip, etagRemoto, lerDados } from "./arquivos";
 import { type EstadoCursor, type Periodo, anosEntre, emLotes, fmt, hojeBrasilia, idCamara, log } from "./comum";
 
 const URL_CEAP = (ano: number) => `https://www.camara.leg.br/cotas/Ano-${ano}.json.zip`;
@@ -52,13 +52,13 @@ export async function ingerirDespesas(
     const inicio = Date.now();
     const mesIni = ano === Number(p.desde.slice(0, 4)) ? Number(p.desde.slice(5, 7)) : 1;
     const mesFim = ano === Number(p.ate.slice(0, 4)) ? Number(p.ate.slice(5, 7)) : 12;
+    if (p.incremental && etags[`${ano}`] === `${await etagRemoto(URL_CEAP(ano))}|${mesIni}`) {
+      log(`despesas ${ano}: arquivo não mudou desde a última carga, pulando`);
+      continue;
+    }
     const arq = await baixar(URL_CEAP(ano));
     if (!arq) {
       log(`despesas ${ano}: arquivo ainda não publicado, pulando`);
-      continue;
-    }
-    if (p.incremental && etags[`${ano}`] === `${arq.etag}|${mesIni}`) {
-      log(`despesas ${ano}: arquivo não mudou desde a última carga, pulando`);
       continue;
     }
 

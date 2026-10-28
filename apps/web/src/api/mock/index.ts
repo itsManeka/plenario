@@ -1,6 +1,6 @@
 import type { FeedItem, Pagina } from "@plenario/core/api";
 import { normalizarBusca } from "@plenario/core/texto";
-import { ApiError } from "../client";
+import { ApiError } from "../erro";
 import { feed, parlamentares, partidos, proposicoes, resumo, votacoes } from "./fixtures";
 
 // Implementa as rotas de packages/core/src/api.ts sobre as fixtures, com latência

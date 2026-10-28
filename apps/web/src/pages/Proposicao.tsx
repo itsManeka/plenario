@@ -1,4 +1,5 @@
 import { Link, useParams } from "react-router";
+import { idDaUrl } from "../lib/ids";
 import { useProposicao } from "../api/queries";
 import { hrefVotacao, ResultadoVotacao } from "../components/FeedCard";
 import { Topo } from "../components/Layout";
@@ -22,7 +23,7 @@ function Skeleton() {
 }
 
 export function Proposicao() {
-  const { id = "" } = useParams();
+  const id = idDaUrl(useParams().id);
   const q = useProposicao(id);
 
   if (q.isPending)

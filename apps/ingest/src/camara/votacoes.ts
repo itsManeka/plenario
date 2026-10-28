@@ -1,6 +1,6 @@
 import { sql } from "@plenario/core/db";
 import { buscarJson } from "../http";
-import { baixar, bytesDoArquivo, lerDados } from "./arquivos";
+import { baixar, bytesDoArquivo, etagRemoto, lerDados } from "./arquivos";
 import {
   API,
   ARQUIVOS,
@@ -279,6 +279,14 @@ export async function ingerirVotacoes(
   for (const ano of anosEntre(p.desde, p.ate)) {
     const inicio = Date.now();
     const base = (c: string) => `${ARQUIVOS}/${c}/json/${c}-${ano}.json`;
+    const conjuntos = ["votacoes", "votacoesVotos", "votacoesProposicoes"];
+    if (p.incremental) {
+      const remotos = await Promise.all(conjuntos.map((c) => etagRemoto(base(c))));
+      if (etags[`${ano}`] === remotos.map((e) => e ?? "-").join("|")) {
+        log(`votações ${ano}: arquivos não mudaram desde a última carga, pulando`);
+        continue;
+      }
+    }
     const arqVotacoes = await baixar(base("votacoes"));
     if (!arqVotacoes) {
       log(`votações ${ano}: arquivo ainda não publicado, pulando`);
@@ -287,10 +295,6 @@ export async function ingerirVotacoes(
     const arqVotos = await baixar(base("votacoesVotos"));
     const arqProps = await baixar(base("votacoesProposicoes"));
     const assinatura = [arqVotacoes, arqVotos, arqProps].map((a) => a?.etag ?? "-").join("|");
-    if (p.incremental && etags[`${ano}`] === assinatura) {
-      log(`votações ${ano}: arquivos não mudaram desde a última carga, pulando`);
-      continue;
-    }
 
     const mapa = new Map<string, VotacaoNormalizada>();
     let maxArquivo: string | undefined;

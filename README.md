@@ -3,6 +3,8 @@
 Acompanhe o que seus parlamentares fazem: como votaram, o que propuseram e quanto gastaram,
 num feed cronológico. Siga quem quiser, sem criar conta.
 
+**Site:** https://tonhonho.github.io/plenario
+
 Projeto de **código aberto e sem fins lucrativos**. Todo dado vem das fontes oficiais da
 Câmara dos Deputados e do Senado Federal, e todo item leva link para a página de origem.
 
@@ -34,6 +36,14 @@ bun run dev:web    # http://localhost:5173
 ```
 
 Para mexer só no front sem banco: `VITE_MOCK=1 bun run dev:web`.
+
+## Como o site é publicado
+
+Não há servidor. Todo dia às 03:00 (Brasília) o workflow `.github/workflows/pages.yml` restaura o
+banco da véspera, roda o ingest incremental, exporta tudo como JSON estático (`bun run export`,
+formato em `packages/core/src/estatico.ts`) e publica no GitHub Pages. A busca e o feed de quem
+você segue rodam no navegador sobre esses arquivos. A API (`apps/api`) continua servindo para
+desenvolvimento local e para quem quiser hospedar uma versão com servidor.
 
 ## Como está organizado
 

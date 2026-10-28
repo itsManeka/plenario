@@ -1,5 +1,5 @@
 import { sql } from "@plenario/core/db";
-import { baixar, bytesDoArquivo, lerDados, type Arquivo } from "./arquivos";
+import { baixar, bytesDoArquivo, etagRemoto, lerDados, type Arquivo } from "./arquivos";
 import {
   ARQUIVOS,
   CASA,
@@ -57,18 +57,20 @@ export async function ingerirProposicoes(
 
   for (const ano of anosEntre(p.desde, p.ate)) {
     const inicio = Date.now();
-    const props = await baixar(`${ARQUIVOS}/proposicoes/json/proposicoes-${ano}.json`);
-    const autores = await baixar(`${ARQUIVOS}/proposicoesAutores/json/proposicoesAutores-${ano}.json`);
+    const urlProps = `${ARQUIVOS}/proposicoes/json/proposicoes-${ano}.json`;
+    const urlAutores = `${ARQUIVOS}/proposicoesAutores/json/proposicoesAutores-${ano}.json`;
+    const chave = `${ano}`;
+    if (p.incremental && etags[chave] === `${await etagRemoto(urlProps)}|${await etagRemoto(urlAutores)}`) {
+      log(`proposições ${ano}: arquivos não mudaram desde a última carga, pulando`);
+      continue;
+    }
+    const props = await baixar(urlProps);
+    const autores = await baixar(urlAutores);
     if (!props || !autores) {
       log(`proposições ${ano}: arquivo ainda não publicado, pulando`);
       continue;
     }
-    const chave = `${ano}`;
     const assinatura = `${props.etag}|${autores.etag}`;
-    if (p.incremental && etags[chave] === assinatura) {
-      log(`proposições ${ano}: arquivos não mudaram desde a última carga, pulando`);
-      continue;
-    }
     const r = await processarAno(ano, props, autores, p, parlamentares);
     if (r.ultimaData && (!ultimaData || r.ultimaData > ultimaData)) ultimaData = r.ultimaData;
     etags[chave] = assinatura;

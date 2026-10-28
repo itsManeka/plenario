@@ -10,6 +10,7 @@ import { NaoEncontrado } from "./pages/NaoEncontrado";
 import { Perfil } from "./pages/Perfil";
 import { Proposicao } from "./pages/Proposicao";
 import { Seguindo } from "./pages/Seguindo";
+import { Sobre } from "./pages/Sobre";
 import { Votacao } from "./pages/Votacao";
 import "./index.css";
 
@@ -25,6 +26,9 @@ const queryClient = new QueryClient({
   },
 });
 
+// No GitHub Pages o site mora em /plenario/ (VITE_BASE): as rotas são relativas a essa base.
+const basename = import.meta.env.BASE_URL.replace(/\/$/, "") || undefined;
+
 const router = createBrowserRouter([
   {
     element: <Layout />,
@@ -35,10 +39,11 @@ const router = createBrowserRouter([
       { path: "p/:id", element: <Perfil /> },
       { path: "votacoes/:id", element: <Votacao /> },
       { path: "proposicoes/:id", element: <Proposicao /> },
+      { path: "sobre", element: <Sobre /> },
       { path: "*", element: <NaoEncontrado /> },
     ],
   },
-]);
+], { basename });
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

@@ -1,8 +1,8 @@
 import { sql } from "@plenario/core/db";
 import { normalizarBusca } from "@plenario/core/texto";
 import { buscarJson } from "../http";
-import { baixar, bytesDoArquivo, lerDados } from "./arquivos";
-import { API, ARQUIVOS, CASA, LEGISLATURA, emLotes, fmt, gravarCursor, idCamara, log } from "./comum";
+import { baixar, bytesDoArquivo, etagRemoto, lerDados } from "./arquivos";
+import { API, ARQUIVOS, CASA, LEGISLATURA, emLotes, fmt, gravarCursor, idCamara, lerCursor, log } from "./comum";
 
 interface DeputadoLista {
   id: number;
@@ -63,10 +63,14 @@ export interface ResultadoDeputados {
 
 export async function ingerirDeputados(): Promise<ResultadoDeputados> {
   const inicio = Date.now();
+  // o arquivo só serve pro nome civil, que já fica no banco: não baixa de novo se não mudou
+  const urlArquivo = `${ARQUIVOS}/deputados/json/deputados.json`;
+  const etagArquivo = await etagRemoto(urlArquivo);
+  const etagAnterior = (await lerCursor("camara:deputados"))?.etagArquivo;
   const [daLegislatura, emExercicio, arquivo] = await Promise.all([
     listar(`${API}/deputados?idLegislatura=${LEGISLATURA}&itens=1000&ordem=ASC&ordenarPor=nome`),
     listar(`${API}/deputados?itens=1000&ordem=ASC&ordenarPor=nome`),
-    baixar(`${ARQUIVOS}/deputados/json/deputados.json`),
+    etagArquivo && etagArquivo === etagAnterior ? Promise.resolve(null) : baixar(urlArquivo),
   ]);
 
   const nomeCivil = new Map<number, string | null>();
@@ -138,7 +142,11 @@ export async function ingerirDeputados(): Promise<ResultadoDeputados> {
     [...legislatura.keys()].filter((id) => noBanco.get(id)?.em_exercicio !== atuais.has(id)),
   );
 
-  await gravarCursor("camara:deputados", { total: linhas.length, emExercicio: atuais.size });
+  await gravarCursor("camara:deputados", {
+    total: linhas.length,
+    emExercicio: atuais.size,
+    etagArquivo: arquivo?.etag ?? etagAnterior,
+  });
   log(
     `deputados: ${fmt(linhas.length)} na legislatura ${LEGISLATURA} (${fmt(atuais.size)} em exercício, ` +
       `${fmt(detalhes.size)} detalhes buscados) em ${((Date.now() - inicio) / 1000).toFixed(0)}s`,

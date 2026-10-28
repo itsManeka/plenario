@@ -82,10 +82,25 @@ export function Layout() {
               ))}
             </ul>
           </nav>
-          <p className="mt-auto px-3 text-xs leading-5 text-muted">
-            Dados oficiais da Câmara dos Deputados e do Senado Federal. Projeto aberto e sem fins
-            lucrativos. Quem você segue fica só neste navegador.
-          </p>
+          <div className="mt-auto space-y-2 px-3 text-xs leading-5 text-muted">
+            <p>
+              Dados oficiais da Câmara dos Deputados e do Senado Federal. Projeto aberto e sem fins
+              lucrativos. Quem você segue fica só neste navegador.
+            </p>
+            <p className="flex flex-wrap gap-x-3">
+              <Link to="/sobre" className="underline underline-offset-2 hover:text-ink">
+                Sobre e fontes
+              </Link>
+              <a
+                href="https://github.com/tonhonho/plenario"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline underline-offset-2 hover:text-ink"
+              >
+                Código no GitHub
+              </a>
+            </p>
+          </div>
         </header>
 
         <div className="min-w-0 max-w-[640px] flex-1 border-line bg-surface md:border-x">
@@ -139,11 +154,14 @@ export function Topo({
   voltar = false,
   children,
   marca = false,
+  acao,
 }: {
   titulo: ReactNode;
   voltar?: boolean;
   children?: ReactNode;
   marca?: boolean;
+  /** Elemento à direita da barra (ex.: link "Sobre" no celular). */
+  acao?: ReactNode;
 }) {
   const navegar = useNavigate();
   const local = useLocation();
@@ -170,6 +188,7 @@ export function Topo({
         ) : (
           <h1 className="min-w-0 truncate text-lg font-semibold">{titulo}</h1>
         )}
+        {acao && <div className="ml-auto">{acao}</div>}
       </div>
       {children}
     </div>

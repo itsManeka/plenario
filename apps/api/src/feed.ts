@@ -7,8 +7,12 @@ import {
   erro400,
   FMT_ISO,
   parlamentarResumo,
+  papelAutoria,
   proposicaoResumo,
-  urlCotaCamara,
+  resumoDespesa,
+  urlFonteDespesa,
+  urlFonteProposicao,
+  urlFonteVoto,
   urlOficialParlamentar,
   votacaoResumo,
   type LinhaParlamentarResumo,
@@ -120,7 +124,7 @@ interface LinhaDespesaCat {
 }
 
 const chave = (...p: (string | number)[]) => p.join("|");
-const RE_MES = /^(\d{4})-(\d{1,2})$/;
+export const RE_MES = /^(\d{4})-(\d{1,2})$/;
 
 // Hidrata uma página de eventos com um número fixo de consultas (no máx. 6, em paralelo),
 // independente do tamanho da página.
@@ -217,7 +221,7 @@ async function montarItens(eventos: LinhaEvento[]): Promise<FeedItem[]> {
       if (!votacao || !v) continue;
       itens.push({
         ...base,
-        urlFonte: votacao.urlOficial ?? votacao.proposicao?.url ?? perfil,
+        urlFonte: urlFonteVoto(votacao, perfil),
         tipo: "voto",
         voto: v.voto,
         votacao,
@@ -226,22 +230,16 @@ async function montarItens(eventos: LinhaEvento[]): Promise<FeedItem[]> {
     } else if (e.tipo === "proposicao") {
       const proposicao = propPorId.get(e.ref_id);
       if (!proposicao) continue;
-      const a = autoriaPor.get(chave(e.ref_id, e.parlamentar_id));
-      // primeiro signatário = autor; sem ordem na fonte, autor único também é autor
-      const autor = a ? a.ordem === 1 || (a.ordem === null && a.n_autores === 1) : false;
-      itens.push({ ...base, urlFonte: proposicao.url ?? perfil, tipo: "proposicao", papel: autor ? "autor" : "coautor", proposicao });
+      const papel = papelAutoria(autoriaPor.get(chave(e.ref_id, e.parlamentar_id)));
+      itens.push({ ...base, urlFonte: urlFonteProposicao(proposicao, perfil), tipo: "proposicao", papel, proposicao });
     } else {
       const m = e.ref_id.match(RE_MES);
       if (!m) continue;
       const ano = Number(m[1]);
       const mes = Number(m[2]);
-      const cats = despPor.get(chave(e.parlamentar_id, ano, mes)) ?? [];
-      cats.sort((x, y) => y.valor - x.valor || x.categoria.localeCompare(y.categoria));
-      const total = Math.round(cats.reduce((s, c) => s + c.valor, 0) * 100) / 100;
-      const externo = externoPorId.get(e.parlamentar_id);
-      // Senado não tem despesa no v1; se vier, o perfil é a página mais específica que há
-      const urlFonte = parlamentar.casa === "camara" && externo ? urlCotaCamara(externo, ano, mes) : perfil;
-      itens.push({ ...base, urlFonte, tipo: "despesa_mensal", ano, mes, total, porCategoria: cats.slice(0, 5) });
+      const { total, porCategoria } = resumoDespesa(despPor.get(chave(e.parlamentar_id, ano, mes)) ?? []);
+      const urlFonte = urlFonteDespesa(parlamentar.casa, externoPorId.get(e.parlamentar_id), ano, mes, perfil);
+      itens.push({ ...base, urlFonte, tipo: "despesa_mensal", ano, mes, total, porCategoria });
     }
   }
   return itens;

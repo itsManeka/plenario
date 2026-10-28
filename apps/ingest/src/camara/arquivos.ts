@@ -41,6 +41,15 @@ async function cabecalho(url: string): Promise<{ etag: string; tamanho: number }
 }
 
 /**
+ * Etag atual do arquivo na fonte, sem baixar (null se não existe). No incremental, comparar
+ * isto com o etag já processado evita baixar de novo arquivo que não mudou, mesmo sem cache
+ * local (no CI o banco é restaurado, mas a pasta de cache não).
+ */
+export async function etagRemoto(url: string): Promise<string | null> {
+  return (await cabecalho(url))?.etag ?? null;
+}
+
+/**
  * Baixa `url` para o cache e devolve o caminho + etag. Se o cache já tem esse etag, não baixa.
  * Devolve null se o arquivo não existe na fonte (ex.: ano sem dado ainda).
  *

@@ -7,6 +7,7 @@ import type {
   VotoTipo,
 } from "@plenario/core/api";
 import { useState, type ReactNode } from "react";
+import { idParaUrl } from "../lib/ids";
 import { Link } from "react-router";
 import {
   brl,
@@ -14,21 +15,23 @@ import {
   categoriaDespesa,
   mesAno,
   mesCorrente,
+  NOTA_PASSAGEM,
   notaQuorum,
   num,
+  semPassagemAerea,
   partidoUf,
 } from "../lib/format";
 import { IconeDiferente, IconeIgual, IconePredio } from "./Icones";
 import { Avatar, Etiqueta, FonteLink, Tempo, VotoSelo } from "./ui";
 
 export function hrefParlamentar(id: string) {
-  return `/p/${encodeURIComponent(id)}`;
+  return `/p/${idParaUrl(id)}`;
 }
 export function hrefVotacao(id: string) {
-  return `/votacoes/${encodeURIComponent(id)}`;
+  return `/votacoes/${idParaUrl(id)}`;
 }
 export function hrefProposicao(id: string) {
-  return `/proposicoes/${encodeURIComponent(id)}`;
+  return `/proposicoes/${idParaUrl(id)}`;
 }
 
 /**
@@ -230,6 +233,9 @@ function CardDespesa({ item }: { item: FeedItemDespesaMensal }) {
             </li>
           ))}
         </ul>
+      )}
+      {semPassagemAerea(item.parlamentar.casa, item.ano, item.mes) && (
+        <p className="mt-2 text-xs leading-4 text-muted">{NOTA_PASSAGEM}</p>
       )}
     </Moldura>
   );
