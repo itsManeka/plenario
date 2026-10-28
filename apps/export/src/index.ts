@@ -25,7 +25,7 @@ import {
 } from "@plenario/core/estatico";
 import type { FeedItemTipo } from "@plenario/core/api";
 import { app } from "../../api/src/app";
-import { RE_MES, selectVotacaoResumo } from "../../api/src/feed";
+import { RE_MES, lerResumoConsulta, parseRefIdConsulta, selectVotacaoResumo } from "../../api/src/feed";
 import {
   FMT_ISO,
   comOPartido,
@@ -309,6 +309,57 @@ function hidratadorDespesa(parls: Map<string, Parl>): Hidratador {
   };
 }
 
+function hidratadorConsulta(parls: Map<string, Parl>): Hidratador {
+  return async function* (geral) {
+    // várias consultas na mesma proposição: vale a apuração mais recente (igual à API)
+    const cursor = sql<
+      (LinhaProposicaoResumo & {
+        evento_id: string;
+        parlamentar_id: string;
+        ocorrido_iso: string;
+        ref_id: string;
+        resumo: unknown;
+        url_fonte: string;
+      })[]
+    >`
+      select e.id::text as evento_id, e.parlamentar_id, to_char(e.ocorrido_em at time zone 'UTC', ${FMT_ISO}) as ocorrido_iso,
+             e.ref_id, e.resumo, c.url_fonte,
+             p.id, p.casa, p.sigla_tipo, p.numero, p.ano, p.ementa, p.url
+      from evento e
+      join proposicao p on p.id = substring(e.ref_id from '^(.+):[0-9]{4}-[0-9]{2}$')
+      join (
+        select distinct on (proposicao_id) proposicao_id, url_fonte
+        from consulta_publica
+        order by proposicao_id, apurado_em desc
+      ) c on c.proposicao_id = p.id
+      where e.tipo = 'consulta_publica'
+      ${ordemEventos(geral)}`.cursor(LOTE_CURSOR);
+    for await (const lote of cursor) {
+      for (const r of lote) {
+        if (!parls.has(r.parlamentar_id)) continue;
+        // mesma regra da API: ref_id fora do padrão ou resumo malformado = evento omitido
+        if (!parseRefIdConsulta(r.ref_id)) continue;
+        const resumo = lerResumoConsulta(r.resumo);
+        if (!resumo || !r.url_fonte) continue;
+        yield {
+          parlamentarId: r.parlamentar_id,
+          item: {
+            id: r.evento_id,
+            parlamentarId: r.parlamentar_id,
+            ocorridoEm: r.ocorrido_iso,
+            urlFonte: r.url_fonte,
+            tipo: "consulta_publica",
+            proposicao: proposicaoResumo(r),
+            votosSim: resumo.votosSim,
+            votosNao: resumo.votosNao,
+            apuradoEm: resumo.apuradoEm,
+          },
+        };
+      }
+    }
+  };
+}
+
 async function gravarFluxo(itens: FeedItemCompacto[], caminho: (pagina: number) => string): Promise<void> {
   const paginas = Math.max(1, Math.ceil(itens.length / TAMANHO_PAGINA));
   for (let n = 1; n <= paginas; n++) {
@@ -399,8 +450,7 @@ async function main() {
     voto: hidratadorVoto(parls, votacoes),
     proposicao: hidratadorProposicao(parls),
     despesa_mensal: hidratadorDespesa(parls),
-    // sem export estatico de consulta ainda
-    consulta_publica: async function* () {},
+    consulta_publica: hidratadorConsulta(parls),
   };
   for (const tipo of TIPOS_FEED) {
     await etapa(`feed ${tipo}`, async () => {
