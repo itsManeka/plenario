@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import {
   contarTabelas,
   limparTabelas,
@@ -49,6 +49,26 @@ describe("guarda do banco de teste (sem conectar)", () => {
     }
   });
 
+  test("guarda recusa host remoto", () => {
+    expect(() =>
+      resolverUrlDeTeste({ TEST_DATABASE_URL: "postgres://plenario:plenario@db.exemplo.com:5432/plenario_test" }),
+    ).toThrow(/host atual: db\.exemplo\.com/);
+    expect(() =>
+      resolverUrlDeTeste({ TEST_DATABASE_URL: "postgres://plenario:plenario@10.0.0.5:5432/plenario_test" }),
+    ).toThrow(/host atual: 10\.0\.0\.5/);
+    for (const host of ["localhost", "127.0.0.1", "[::1]"]) {
+      const url = `postgres://plenario:plenario@${host}:5433/plenario_test`;
+      expect(resolverUrlDeTeste({ TEST_DATABASE_URL: url })).toBe(url);
+    }
+  });
+
+  test("guarda recusa host e hostaddr na query string", () => {
+    for (const chave of ["host", "hostaddr"]) {
+      const url = `postgres://plenario:plenario@localhost:5433/plenario_test?${chave}=db.exemplo.com`;
+      expect(() => resolverUrlDeTeste({ TEST_DATABASE_URL: url })).toThrow(new RegExp(`"${chave}"`));
+    }
+  });
+
   test("default e URL de teste com query passam sem sufixo na env", () => {
     expect(resolverUrlDeTeste({})).toBe("postgres://localhost:5432/plenario_test");
     const comQuery = "postgres://plenario:plenario@localhost:5433/plenario_test?sslmode=disable";
@@ -61,10 +81,6 @@ describe("seed e truncate", () => {
 
   beforeAll(async () => {
     sql = await prepararBancoDeTeste();
-  });
-
-  afterAll(async () => {
-    if (sql) await sql.end();
   });
 
   test("C48 seed minimo, truncate zera as 6 tabelas e o seed pode ser repetido", async () => {

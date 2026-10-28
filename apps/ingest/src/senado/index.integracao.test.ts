@@ -94,8 +94,6 @@ beforeAll(async () => {
   ({ sincronizarConsultas: sincronizarConsultasReal } = await import("./consultas"));
 });
 
-// Sem sql.end(): o cliente e um singleton do processo, compartilhado com os outros arquivos do `bun test`.
-
 beforeEach(async () => {
   await liberarCursor();
   await limparTabelas(sql);
@@ -222,6 +220,30 @@ describe("isolamento entre fontes", () => {
     expect(chamadas).toContain("partidos");
     expect(await cursor("senado:votacoes")).toBeUndefined();
     expect(await cursor("senado:proposicoes")).toEqual({ ate: OPCOES.ate });
+  });
+});
+
+describe("log de falha", () => {
+  test("C72 mensagem de erro longa e truncada em 200 caracteres na linha FALHOU", async () => {
+    const linhas: string[] = [];
+    console.log = (...args: unknown[]): void => {
+      linhas.push(args.map(String).join(" "));
+    };
+    try {
+      const msg = "a".repeat(200) + "b".repeat(300);
+      const f = fontes({
+        sincronizarProposicoes: async () => {
+          throw new Error(msg);
+        },
+      });
+      await capturar(run(OPCOES, f));
+      const linha = linhas.find((l) => l.includes("proposicoes: FALHOU"));
+      expect(linha).toBeDefined();
+      expect(linha).toContain("a".repeat(200));
+      expect(linha).not.toContain("b");
+    } finally {
+      console.log = CONSOLE_LOG_ORIGINAL;
+    }
   });
 });
 

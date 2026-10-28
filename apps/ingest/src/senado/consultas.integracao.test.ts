@@ -112,9 +112,6 @@ beforeAll(async () => {
   statusRedirecao = Number(/^HTTP\/1\.1 (\d{3})/.exec(hdr)?.[1]);
 });
 
-// Sem sql.end(): o cliente e um singleton do processo, compartilhado com os outros testes do `bun test`
-// (banco.smoke.test.ts o encerra no seu afterAll); encerrar aqui derrubaria quem roda depois.
-
 beforeEach(async () => {
   // truncate no inicio de cada teste: repetivel entre execucoes seguidas
   await liberarEventos();

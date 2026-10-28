@@ -27,10 +27,35 @@ function nomeDoBanco(url: string): string {
   return semQuery.slice(semQuery.lastIndexOf("/") + 1) || "(vazio)";
 }
 
+// O teste apaga tabelas: so banco na propria maquina. `new URL` devolve o IPv6 entre colchetes.
+const HOSTS_LOCAIS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+function exigirHostLocal(url: string, origem: string): void {
+  let host: string;
+  let params: URLSearchParams;
+  try {
+    const u = new URL(url);
+    host = u.hostname;
+    params = u.searchParams;
+  } catch {
+    throw new Error(`${origem} nao e uma URL valida`);
+  }
+  // `host`/`hostaddr` na query sobrepoem o hostname em clientes libpq; recusados para a guarda nao ser contornavel.
+  for (const chave of ["host", "hostaddr"]) {
+    if (params.has(chave)) {
+      throw new Error(`${origem} nao pode ter o parametro de query "${chave}" (a guarda de host valeria so para o hostname)`);
+    }
+  }
+  if (!HOSTS_LOCAIS.has(host)) {
+    throw new Error(`${origem} precisa apontar para localhost, 127.0.0.1 ou ::1 (host atual: ${host || "(vazio)"})`);
+  }
+}
+
 function exigirSufixoTeste(url: string, origem: string): string {
   if (!SUFIXO_TESTE.test(url)) {
     throw new Error(`${origem} precisa apontar para banco terminado em _test (banco atual: ${nomeDoBanco(url)})`);
   }
+  exigirHostLocal(url, origem);
   return url;
 }
 
@@ -49,19 +74,18 @@ export async function prepararBancoDeTeste(): Promise<Sql> {
 }
 
 export async function limparTabelas(sql: Sql): Promise<void> {
-  await sql`truncate consulta_publica, evento, proposicao_autor, proposicao, parlamentar, ingest_cursor restart identity cascade`;
+  // sql(lista) escapa cada nome como identificador (postgres/src/types.js:70 e :212-216); a lista e a constante fixa.
+  await sql`truncate ${sql([...TABELAS_DO_INGEST])} restart identity cascade`;
 }
 
 export async function contarTabelas(sql: Sql): Promise<ContagemTabelas> {
-  const [r] = await sql<ContagemTabelas[]>`select
-    (select count(*)::int from consulta_publica) as consulta_publica,
-    (select count(*)::int from evento) as evento,
-    (select count(*)::int from proposicao_autor) as proposicao_autor,
-    (select count(*)::int from proposicao) as proposicao,
-    (select count(*)::int from parlamentar) as parlamentar,
-    (select count(*)::int from ingest_cursor) as ingest_cursor`;
-  if (!r) throw new Error("contagem de tabelas nao retornou linha");
-  return r;
+  const contagem = {} as ContagemTabelas;
+  for (const tabela of TABELAS_DO_INGEST) {
+    const [r] = await sql<{ n: number }[]>`select count(*)::int as n from ${sql(tabela)}`;
+    if (!r) throw new Error(`contagem de ${tabela} nao retornou linha`);
+    contagem[tabela] = r.n;
+  }
+  return contagem;
 }
 
 // Seed minimo: 1 parlamentar do Senado, 1 proposicao `senado:<codigo>` e o parlamentar como autor com ordem 1.

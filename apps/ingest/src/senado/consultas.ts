@@ -77,7 +77,7 @@ function puladasDoCursor(estado: Record<string, unknown> | null): Puladas {
   return saida;
 }
 
-const MAX_MSG_ERRO = 200;
+export const MAX_MSG_ERRO = 200;
 
 /** `name: message` cortada; sem o trecho `params:` que o drizzle anexa a "Failed query". */
 function descreverErro(e: unknown): string {

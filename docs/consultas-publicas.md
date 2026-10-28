@@ -139,6 +139,8 @@ coletivo dizer o contrário na issue.
    fica registrada da mesma forma por 3 dias.
    Depois de 10 falhas seguidas (rede, status, template alterado, leitura inválida) a execução
    para as consultas e loga; pulo esperado não conta e uma leitura boa zera a contagem.
+   Erro ao gravar uma leitura boa (banco) conta como falha, mas não registra a matéria por 3 dias:
+   ela volta na próxima execução.
 7. **Endpoint oficial:** pedir ao Senado em paralelo (texto abaixo). O envio fica com quem mantém o
    projeto; o epic não depende da resposta.
 8. **Novo valor em `evento_tipo`:** o push puro basta, sem linha nova em `sql/extra.sql`. Teste

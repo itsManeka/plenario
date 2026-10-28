@@ -57,6 +57,11 @@ requisição por intervalo (`INGEST_CONSULTAS_INTERVALO_MS`, padrão 1000) e um 
 execução (`INGEST_CONSULTAS_MAX`, padrão 500), a de leitura mais antiga primeiro. Leitura que falha
 é pulada e logada, nunca vira zero.
 
+No `ingest senado`, cada fonte (parlamentares, votações, proposições, consultas) roda isolada: a
+falha de uma é logada e as demais seguem, exceto votações e proposições, que dependem da lista de
+senadores e são puladas se parlamentares falhar. Com qualquer falha, o processo termina com erro
+depois de rodar o resto.
+
 Escopo inicial: legislatura atual (Câmara 57ª, desde 01/02/2023).
 
 ## Rodar local

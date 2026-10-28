@@ -14,7 +14,7 @@
 // publica votação e autoria com atraso de alguns dias), ou do início da 57ª legislatura.
 
 import type { OpcoesIngest } from "../index";
-import { FONTE_CURSOR_CONSULTAS, sincronizarConsultas, type ResultadoConsultas } from "./consultas";
+import { FONTE_CURSOR_CONSULTAS, MAX_MSG_ERRO, sincronizarConsultas, type ResultadoConsultas } from "./consultas";
 import { gravarCursor, lerCursor } from "./cursor";
 import { completarPartidos, sincronizarParlamentares } from "./parlamentares";
 import { sincronizarProposicoes } from "./proposicoes";
@@ -69,7 +69,7 @@ export async function run(opcoes: OpcoesIngest, fontes: Fontes = FONTES): Promis
   const erros: { fonte: string; erro: unknown }[] = [];
   const falhou = (fonte: string, erro: unknown): void => {
     erros.push({ fonte, erro });
-    log(`${fonte}: FALHOU (${nomeErro(erro)}: ${erro instanceof Error ? erro.message : String(erro)})`);
+    log(`${fonte}: FALHOU (${nomeErro(erro)}: ${(erro instanceof Error ? erro.message : String(erro)).slice(0, MAX_MSG_ERRO)})`);
   };
 
   let senadores: Awaited<ReturnType<typeof sincronizarParlamentares>> | undefined;

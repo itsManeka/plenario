@@ -7,6 +7,6 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test"
   },
-  "dependencies": { "@plenario/core": "workspace:*", "drizzle-orm": "^0.44.0" },
+  "dependencies": { "@plenario/core": "workspace:*", "drizzle-orm": "^0.45.2" },
   "devDependencies": { "typescript": "^5.8.0", "@types/bun": "latest" }
 }
