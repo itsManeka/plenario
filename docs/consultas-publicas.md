@@ -4,7 +4,8 @@ Spike (sem código) para trazer ao feed o placar das consultas públicas do e-Ci
 votos sim e não, instante da apuração, aviso fixo e link para a página oficial. Só número e data:
 nenhum rótulo ("rejeitada", "favorita", "maioria"), nenhuma cor por lado.
 
-Status: **aguarda o coletivo** (decisão 1). Nada de código entra antes da resposta na issue.
+Status: **aguarda o coletivo** (decisão 1). Nada entra no upstream (PR) antes da resposta na issue;
+o código é feito antes, num branch do fork.
 
 ## Fonte
 
@@ -122,11 +123,16 @@ coletivo dizer o contrário na issue.
    teto das elegíveis no Senado, e só as já ingeridas entram. Configurável por variável de ambiente.
 7. **Endpoint oficial:** pedir ao Senado em paralelo (texto abaixo). O envio fica com quem mantém o
    projeto; o epic não depende da resposta.
-8. **Novo valor em `evento_tipo`:** f02 testa se `bun run db:push` emite
-   `ALTER TYPE evento_tipo ADD VALUE 'consulta_publica'` sem recriar o tipo, em banco vazio e em banco
-   populado. Se não emitir, entra
-   `alter type evento_tipo add value if not exists 'consulta_publica';` em `packages/core/sql/extra.sql`
-   (idempotente, fora de transação). O resultado fica registrado aqui.
+8. **Novo valor em `evento_tipo`:** o push puro basta, sem linha nova em `sql/extra.sql`. Teste
+   de 2026-10-28 com `drizzle-kit push --force` (PostgreSQL 16):
+   - Banco vazio: cria a tabela `consulta_publica` (PK `materia_cod`, FK para `proposicao` com
+     `on delete cascade`, índice em `apurado_em`) e o enum já sai com os quatro valores.
+   - Banco com o schema anterior e linhas em `evento`: o drizzle emite
+     `ALTER TYPE "public"."evento_tipo" ADD VALUE 'consulta_publica';` antes do `CREATE TABLE`. O
+     OID do tipo não muda, e as linhas de `evento` e `parlamentar` continuam lá.
+
+   O Postgres não deixa usar o valor novo na mesma transação que o adiciona: ingest e testes só
+   gravam `consulta_publica` depois do push.
 9. **PL 5064/2023 (160575) na base?** É de autoria de senador (Hamilton Mourão, casa iniciadora SF,
    objetivo "Iniciadora"), então o ingest do Senado o grava se a janela `--desde` cobrir 2023-10-19.
    A verificação da f04 roda o ingest com essa janela, ou semeia a proposição.
