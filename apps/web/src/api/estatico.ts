@@ -88,6 +88,19 @@ function buscar<T>(caminho: string): Promise<T> {
   return p as Promise<T>;
 }
 
+// Fluxo de consulta pode não existir no site já publicado (export anterior à feature): 404 nele
+// vira página vazia. Só para esse tipo; erro de download não vai para o cache (buscar já apaga).
+async function paginaDo(f: Fluxo, pagina: number): Promise<PaginaFeed> {
+  try {
+    return await buscar<PaginaFeed>(f.arquivo(pagina));
+  } catch (erro) {
+    if (f.tolerante404 && erro instanceof ApiError && erro.status === 404) {
+      return { itens: [], proxima: null, total: 0 };
+    }
+    throw erro;
+  }
+}
+
 // ---------- índice de parlamentares e votações ----------
 
 let mapaIndice: Promise<Map<string, ParlamentarIndice>> | null = null;
@@ -152,6 +165,7 @@ function remontar(
 interface Fluxo {
   chave: string;
   arquivo: (pagina: number) => string;
+  tolerante404: boolean;
 }
 
 // Cursor: posição de cada fluxo que já andou. Ausente = início (página 1, item 0); 0 = acabou.
@@ -185,7 +199,7 @@ async function mesclar(fluxos: Fluxo[], cursorTexto: string | null | undefined):
   // página corrente de cada fluxo vivo (a concorrência fica limitada em `buscar`)
   await Promise.all(
     estados.map(async (e) => {
-      e.dados = await buscar<PaginaFeed>(e.f.arquivo(e.pagina));
+      e.dados = await paginaDo(e.f, e.pagina);
     }),
   );
 
@@ -205,7 +219,7 @@ async function mesclar(fluxos: Fluxo[], cursorTexto: string | null | undefined):
         // próximo a sair, então só agora baixa a página seguinte dele (e só dele).
         e.pagina = d.proxima;
         e.item = 0;
-        d = e.dados = await buscar<PaginaFeed>(e.f.arquivo(e.pagina));
+        d = e.dados = await paginaDo(e.f, e.pagina);
         if (d.itens.length === 0) {
           if (d.proxima === null) e.acabou = true;
           continue;
@@ -257,7 +271,11 @@ function tiposOuTodos(tipos: FeedItemTipo[] | undefined): FeedItemTipo[] {
 
 function fluxosDe(ids: string[], tipos: FeedItemTipo[] | undefined): Fluxo[] {
   return ids.flatMap((id) =>
-    tiposOuTodos(tipos).map((t) => ({ chave: `${id}|${t}`, arquivo: (n: number) => caminhos.feed(id, t, n) })),
+    tiposOuTodos(tipos).map((t) => ({
+      chave: `${id}|${t}`,
+      arquivo: (n: number) => caminhos.feed(id, t, n),
+      tolerante404: t === "consulta_publica",
+    })),
   );
 }
 
@@ -339,6 +357,7 @@ export const fonteEstatica: Fonte = {
           tiposOuTodos(tipos).map((t) => ({
             chave: `geral|${t}`,
             arquivo: (n: number) => caminhos.feedGeral(t, n),
+            tolerante404: t === "consulta_publica",
           })),
           cursor,
         ),

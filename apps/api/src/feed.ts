@@ -21,7 +21,35 @@ import {
 } from "./util";
 
 export const TAMANHO_PAGINA = 30;
-const TIPOS: readonly FeedItemTipo[] = ["voto", "proposicao", "despesa_mensal"];
+const TIPOS: readonly FeedItemTipo[] = ["voto", "proposicao", "despesa_mensal", "consulta_publica"];
+
+// ref_id de consulta_publica: "<proposicao_id>:<AAAA-MM>". O proposicao_id tem ":" ("senado:123"),
+// então o corte é no ÚLTIMO ":". Formato legado ("2026-09") ou fora do padrão = null.
+const RE_REF_CONSULTA = /^(.+):(\d{4}-(?:0[1-9]|1[0-2]))$/;
+
+export function parseRefIdConsulta(refId: string): { proposicaoId: string; mes: string } | null {
+  const m = RE_REF_CONSULTA.exec(refId);
+  return m ? { proposicaoId: m[1]!, mes: m[2]! } : null;
+}
+
+export interface ResumoConsulta {
+  votosSim: number;
+  votosNao: number;
+  apuradoEm: string;
+}
+
+const RE_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+const inteiroNaoNegativo = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0;
+
+// Valida o jsonb `evento.resumo` de consulta_publica; malformado = null (evento omitido).
+export function lerResumoConsulta(resumo: unknown): ResumoConsulta | null {
+  if (typeof resumo !== "object" || resumo === null || Array.isArray(resumo)) return null;
+  const r = resumo as Record<string, unknown>;
+  const { votosSim, votosNao, apuradoEm } = r;
+  if (!inteiroNaoNegativo(votosSim) || !inteiroNaoNegativo(votosNao)) return null;
+  if (typeof apuradoEm !== "string" || !RE_ISO.test(apuradoEm) || Number.isNaN(Date.parse(apuradoEm))) return null;
+  return { votosSim, votosNao, apuradoEm };
+}
 
 export function validarTipos(v: string | undefined): FeedItemTipo[] | null {
   if (v === undefined || v.trim() === "") return null;
@@ -43,6 +71,7 @@ interface LinhaEvento {
   tipo: FeedItemTipo;
   ocorrido_iso: string;
   ref_id: string;
+  resumo: unknown;
   cur_us: string;
 }
 
@@ -62,7 +91,7 @@ export async function paginaFeed(f: FiltroFeed): Promise<Pagina<FeedItem>> {
   const condCursor = c
     ? sql`and (e.ocorrido_em, e.id) < (timestamptz 'epoch' + ${c[1]!}::bigint * interval '1 microsecond', ${c[2]!}::bigint)`
     : sql``;
-  const colunas = sql`e.id::text as id, e.parlamentar_id, e.tipo, e.ocorrido_em, e.ref_id,
+  const colunas = sql`e.id::text as id, e.parlamentar_id, e.tipo, e.ocorrido_em, e.ref_id, e.resumo,
     to_char(e.ocorrido_em at time zone 'UTC', ${FMT_ISO}) as ocorrido_iso,
     (extract(epoch from e.ocorrido_em) * 1000000)::bigint::text as cur_us`;
 
@@ -115,6 +144,11 @@ interface LinhaAutoria {
   n_autores: number;
 }
 
+interface LinhaConsultaUrl {
+  proposicao_id: string;
+  url_fonte: string;
+}
+
 interface LinhaDespesaCat {
   parlamentar_id: string;
   ano: number;
@@ -127,7 +161,7 @@ const chave = (...p: (string | number)[]) => p.join("|");
 export const RE_MES = /^(\d{4})-(\d{1,2})$/;
 
 // Hidrata uma página de eventos com um número fixo de consultas (no máx. 6, em paralelo),
-// independente do tamanho da página.
+// independente do tamanho da página (a de consulta_publica entra como a 7ª).
 async function montarItens(eventos: LinhaEvento[]): Promise<FeedItem[]> {
   if (eventos.length === 0) return [];
 
@@ -139,10 +173,20 @@ async function montarItens(eventos: LinhaEvento[]): Promise<FeedItem[]> {
     .map((e) => ({ e, m: e.ref_id.match(RE_MES) }))
     .filter((x): x is { e: LinhaEvento; m: RegExpMatchArray } => x.m !== null);
 
-  const votacaoIds = [...new Set(votos.map((e) => e.ref_id))];
-  const propIds = [...new Set(props.map((e) => e.ref_id))];
+  const consultas = eventos
+    .filter((e) => e.tipo === "consulta_publica")
+    .map((e) => ({ e, ref: parseRefIdConsulta(e.ref_id), resumo: lerResumoConsulta(e.resumo) }))
+    .filter(
+      (x): x is { e: LinhaEvento; ref: { proposicaoId: string; mes: string }; resumo: ResumoConsulta } =>
+        x.ref !== null && x.resumo !== null,
+    );
+  const consultaPropIds = [...new Set(consultas.map((x) => x.ref.proposicaoId))];
 
-  const [parls, votacoes, votosLinhas, proposicoes, autorias, despesas] = await Promise.all([
+  const votacaoIds = [...new Set(votos.map((e) => e.ref_id))];
+  const propIds = [...new Set([...props.map((e) => e.ref_id), ...consultaPropIds])];
+  const propEventoIds = [...new Set(props.map((e) => e.ref_id))];
+
+  const [parls, votacoes, votosLinhas, proposicoes, autorias, despesas, consultaUrls] = await Promise.all([
     sql<(LinhaParlamentarResumo & { id_externo: string })[]>`
       select id, casa, id_externo, nome, partido, uf, foto_url, em_exercicio
       from parlamentar where id = any(${parlIds}::text[])`,
@@ -171,7 +215,7 @@ async function montarItens(eventos: LinhaEvento[]): Promise<FeedItem[]> {
       ? sql<LinhaProposicaoResumo[]>`
           select id, casa, sigla_tipo, numero, ano, ementa, url from proposicao where id = any(${propIds}::text[])`
       : [],
-    propIds.length
+    propEventoIds.length
       ? sql<LinhaAutoria[]>`
           select a.proposicao_id, a.parlamentar_id, a.ordem,
                  (select count(*)::int from proposicao_autor b where b.proposicao_id = a.proposicao_id) as n_autores
@@ -189,6 +233,13 @@ async function montarItens(eventos: LinhaEvento[]): Promise<FeedItem[]> {
             using (parlamentar_id, ano, mes)
           group by 1, 2, 3, 4`
       : [],
+    consultaPropIds.length
+      ? sql<LinhaConsultaUrl[]>`
+          -- várias consultas na mesma proposição: vale a apuração mais recente
+          select distinct on (proposicao_id) proposicao_id, url_fonte
+          from consulta_publica where proposicao_id = any(${consultaPropIds}::text[])
+          order by proposicao_id, apurado_em desc`
+      : [],
   ]);
 
   const parlPorId = new Map(parls.map((p) => [p.id, parlamentarResumo(p)]));
@@ -205,6 +256,9 @@ async function montarItens(eventos: LinhaEvento[]): Promise<FeedItem[]> {
     if (l) l.push({ categoria: d.categoria, valor: d.valor });
     else despPor.set(k, [{ categoria: d.categoria, valor: d.valor }]);
   }
+
+  const consultaUrlPor = new Map(consultaUrls.map((c) => [c.proposicao_id, c.url_fonte]));
+  const consultaPorEvento = new Map(consultas.map((x) => [x.e.id, x]));
 
   // Evento cuja origem sumiu (ref quebrada) é omitido em vez de virar card incompleto; o cursor
   // continua andando pelo evento cru, então nada se repete.
@@ -240,6 +294,21 @@ async function montarItens(eventos: LinhaEvento[]): Promise<FeedItem[]> {
       const { total, porCategoria } = resumoDespesa(despPor.get(chave(e.parlamentar_id, ano, mes)) ?? []);
       const urlFonte = urlFonteDespesa(parlamentar.casa, externoPorId.get(e.parlamentar_id), ano, mes, perfil);
       itens.push({ ...base, urlFonte, tipo: "despesa_mensal", ano, mes, total, porCategoria });
+    } else if (e.tipo === "consulta_publica") {
+      const c = consultaPorEvento.get(e.id);
+      if (!c) continue;
+      const proposicao = propPorId.get(c.ref.proposicaoId);
+      const urlFonte = consultaUrlPor.get(c.ref.proposicaoId);
+      if (!proposicao || !urlFonte) continue;
+      itens.push({
+        ...base,
+        urlFonte,
+        tipo: "consulta_publica",
+        proposicao,
+        votosSim: c.resumo.votosSim,
+        votosNao: c.resumo.votosNao,
+        apuradoEm: c.resumo.apuradoEm,
+      });
     }
   }
   return itens;
