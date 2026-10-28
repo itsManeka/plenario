@@ -31,6 +31,31 @@ const parlamentares = [
 // separados por 1 µs (o cursor não pode truncar pra milissegundo).
 const N_ENCHIMENTO = 70;
 
+const URL_CONSULTA_BASE = "https://www12.senado.leg.br/ecidadania/visualizacaomateria?id=123";
+const RESUMO_OK = { votosSim: 120, votosNao: 30, apuradoEm: "2026-09-28T10:00:00.000Z" };
+type ResumoSemeado = Record<string, string | number | null> | null;
+let idConsultaBase = "";
+
+async function semearEvento(parlamentarId: string, ocorridoEm: string, refId: string, resumo: ResumoSemeado): Promise<string> {
+  const [r] = await sql<{ id: string }[]>`insert into evento (parlamentar_id, tipo, ocorrido_em, ref_id, resumo)
+    values (${parlamentarId}, 'consulta_publica', ${ocorridoEm}::timestamptz, ${refId}, ${resumo === null ? null : JSON.stringify(resumo)}::jsonb)
+    returning id::text as id`;
+  return r!.id;
+}
+
+async function apagarEventos(ids: string[]): Promise<void> {
+  if (ids.length > 0) await sql`delete from evento where id = any(${ids}::bigint[])`;
+}
+
+async function idsFeed(path: string): Promise<string[]> {
+  return (await percorrer(path)).ids;
+}
+
+async function itensConsulta(path: string): Promise<Extract<FeedItem, { tipo: "consulta_publica" }>[]> {
+  const { paginas } = await percorrer(path);
+  return paginas.flatMap((p) => p.itens).filter((i): i is Extract<FeedItem, { tipo: "consulta_publica" }> => i.tipo === "consulta_publica");
+}
+
 beforeAll(async () => {
   await sql`truncate evento, despesa, voto, votacao, exercicio, proposicao_autor, consulta_publica, proposicao, parlamentar restart identity cascade`;
 
@@ -127,6 +152,13 @@ beforeAll(async () => {
     await sql`insert into evento (parlamentar_id, tipo, ocorrido_em, ref_id)
       values ('camara:3', 'proposicao', ${base + us + "Z"}::timestamptz, ${"camara:f" + i})`;
   }
+
+  // consulta pública: proposição do Senado (ref_id com ":" no id) + a apuração + o evento do autor
+  await sql`insert into proposicao (id, casa, id_externo, sigla_tipo, numero, ano, ementa, url) values
+    ('senado:123', 'senado', '123', 'PLS', 123, 2026, 'Ementa da consulta', 'https://www25.senado.leg.br/web/atividade/materias/-/materia/123')`;
+  await sql`insert into consulta_publica (materia_cod, proposicao_id, votos_sim, votos_nao, apurado_em, url_fonte) values
+    ('9001', 'senado:123', 120, 30, '2026-09-28T10:00:00Z', ${URL_CONSULTA_BASE})`;
+  idConsultaBase = await semearEvento("camara:1", "2026-09-28T12:00:00Z", "senado:123:2026-09", RESUMO_OK);
 });
 
 afterAll(async () => {
@@ -134,7 +166,7 @@ afterAll(async () => {
 });
 
 async function idsEsperados(filtro = sql``): Promise<string[]> {
-  const r = await sql<{ id: string }[]>`select id::text as id from evento e where true ${filtro} order by ocorrido_em desc, id desc`;
+  const r = await sql<{ id: string }[]>`select id::text as id from evento e where true ${filtro} order by e.ocorrido_em desc, e.id desc`; // e.id: sem o prefixo, "id" é o alias texto e ordena lexicograficamente
   return r.map((x) => x.id);
 }
 
@@ -244,10 +276,10 @@ describe("parlamentares?ids=", () => {
 });
 
 describe("feed", () => {
-  test("urlFonte nunca nulo nos três tipos, com a fonte mais específica", async () => {
+  test("urlFonte nunca nulo nos quatro tipos, com a fonte mais específica", async () => {
     const { paginas } = await percorrer("/feed");
     const itens = paginas.flatMap((p) => p.itens);
-    expect(new Set(itens.map((i) => i.tipo))).toEqual(new Set(["voto", "proposicao", "despesa_mensal"] as const));
+    expect(new Set(itens.map((i) => i.tipo))).toEqual(new Set(["voto", "proposicao", "despesa_mensal", "consulta_publica"] as const));
     for (const i of itens) expect(i.urlFonte).toStartWith("https://");
 
     const url = (pred: (i: FeedItem) => boolean) => itens.find(pred)?.urlFonte;
@@ -269,7 +301,7 @@ describe("feed", () => {
 
   test("feed geral pagina sem pular nem duplicar", async () => {
     const esperado = await idsEsperados();
-    expect(esperado.length).toBe(11 + N_ENCHIMENTO);
+    expect(esperado.length).toBe(12 + N_ENCHIMENTO); // 11 fixos + 1 consulta_publica
     const { ids, paginas } = await percorrer("/feed");
     expect(ids).toEqual(esperado);
     expect(new Set(ids).size).toBe(ids.length);
@@ -285,19 +317,18 @@ describe("feed", () => {
     expect(proprio.ids).toEqual(await idsEsperados(sql`and parlamentar_id = 'camara:3'`));
   });
 
-  test("evento consulta_publica nao vira card nem despesa_mensal", async () => {
-    // ref_id no formato AAAA-MM: o ramo else antigo (despesa) aceitaria esse valor
-    const [ins] = await sql<{ id: string }[]>`insert into evento (parlamentar_id, tipo, ocorrido_em, ref_id)
-      values ('camara:1', 'consulta_publica', '2026-09-30T12:00:00Z', '2026-09')
-      returning id::text as id`;
+  test("C74: evento consulta_publica com ref_id legado (AAAA-MM) e omitido, nao vira despesa_mensal", async () => {
+    // ref_id no formato AAAA-MM, com resumo válido: só a ausência da proposição no ref_id o omite
+    const id = await semearEvento("camara:1", "2026-09-30T12:00:00Z", "2026-09", RESUMO_OK);
     try {
       const { ids, paginas } = await percorrer("/feed");
-      expect(ids).not.toContain(ins!.id);
+      expect(ids).not.toContain(id);
+      expect(ids).toContain(idConsultaBase);
       expect(new Set(paginas.flatMap((p) => p.itens.map((i) => i.tipo)))).toEqual(
-        new Set(["voto", "proposicao", "despesa_mensal"] as const),
+        new Set(["voto", "proposicao", "despesa_mensal", "consulta_publica"] as const),
       );
     } finally {
-      await sql`delete from evento where id = ${ins!.id}::bigint`;
+      await apagarEventos([id]);
     }
   });
 
@@ -343,6 +374,239 @@ describe("feed", () => {
     // autor único sem ordem na fonte conta como autor
     const f = body.itens.find((i) => i.tipo === "proposicao" && i.proposicao.id === "camara:f0");
     expect(f && f.tipo === "proposicao" ? f.papel : null).toBe("autor");
+  });
+});
+
+const TIPOS_FEED = ["voto", "proposicao", "despesa_mensal", "consulta_publica"] as const;
+
+// Consultas semeadas pelos testes de paginação/duplicata: proposições "camara:cp*", tudo apagado no finally.
+async function limparSemeadas(): Promise<void> {
+  await sql`delete from evento where tipo = 'consulta_publica' and ref_id like 'camara:cp%'`;
+  await sql`delete from proposicao where id like 'camara:cp%'`; // consulta_publica cai por cascade
+}
+
+async function semearProposicaoConsulta(i: string): Promise<void> {
+  await sql`insert into proposicao (id, casa, id_externo, sigla_tipo, numero, ano) values (${"camara:cp" + i}, 'camara', ${"cp" + i}, 'PL', ${Number(i) || 1}, 2026)`;
+  await sql`insert into consulta_publica (materia_cod, proposicao_id, votos_sim, votos_nao, apurado_em, url_fonte)
+    values (${"cpm" + i}, ${"camara:cp" + i}, 5, 6, '2026-08-01T00:00:00Z', ${"https://www12.senado.leg.br/ecidadania/visualizacaomateria?id=" + i})`;
+}
+
+describe("feed consulta_publica", () => {
+  test("C73: ref_id com ':' no id da proposicao e partido no ultimo ':'", async () => {
+    const itens = await itensConsulta("/feed?tipos=consulta_publica");
+    const base = itens.find((i) => i.id === idConsultaBase);
+    expect(base?.proposicao.id).toBe("senado:123");
+    expect(base?.parlamentar.id).toBe("camara:1");
+  });
+
+  test("C75: evento sem linha em consulta_publica e omitido, com 200", async () => {
+    // camara:p1 existe, mas não tem apuração: sem urlFonte não há card
+    const id = await semearEvento("camara:2", "2026-09-28T12:00:00Z", "camara:p1:2026-09", RESUMO_OK);
+    try {
+      const ids = await idsFeed("/feed?tipos=consulta_publica");
+      expect(ids).not.toContain(id);
+      expect(ids).toContain(idConsultaBase);
+    } finally {
+      await apagarEventos([id]);
+    }
+  });
+
+  test("C76: evento de proposicao ausente e omitido, com 200", async () => {
+    const id = await semearEvento("camara:2", "2026-09-28T12:00:00Z", "senado:999:2026-09", RESUMO_OK);
+    try {
+      const ids = await idsFeed("/feed?tipos=consulta_publica");
+      expect(ids).not.toContain(id);
+      expect(ids).toContain(idConsultaBase);
+    } finally {
+      await apagarEventos([id]);
+    }
+  });
+
+  test("C77: votosSim negativo omite o evento", async () => {
+    const id = await semearEvento("camara:2", "2026-09-28T12:00:00Z", "senado:123:2026-08", { ...RESUMO_OK, votosSim: -1 });
+    try {
+      const ids = await idsFeed("/feed?tipos=consulta_publica");
+      expect(ids).not.toContain(id);
+      expect(ids).toContain(idConsultaBase);
+    } finally {
+      await apagarEventos([id]);
+    }
+  });
+
+  test("C78: votosNao fracionario omite o evento", async () => {
+    const id = await semearEvento("camara:2", "2026-09-28T12:00:00Z", "senado:123:2026-08", { ...RESUMO_OK, votosNao: 1.5 });
+    try {
+      const ids = await idsFeed("/feed?tipos=consulta_publica");
+      expect(ids).not.toContain(id);
+      expect(ids).toContain(idConsultaBase);
+    } finally {
+      await apagarEventos([id]);
+    }
+  });
+
+  test("C79: resumo sem apuradoEm ou com apuradoEm numerico omite o evento", async () => {
+    const semData = await semearEvento("camara:2", "2026-09-28T12:00:00Z", "senado:123:2026-07", { votosSim: 1, votosNao: 2 });
+    const numerica = await semearEvento("camara:2", "2026-09-28T12:00:00Z", "senado:123:2026-06", { ...RESUMO_OK, apuradoEm: 1790000000000 });
+    try {
+      const ids = await idsFeed("/feed?tipos=consulta_publica");
+      expect(ids).not.toContain(semData);
+      expect(ids).not.toContain(numerica);
+      expect(ids).toContain(idConsultaBase);
+    } finally {
+      await apagarEventos([semData, numerica]);
+    }
+  });
+
+  test("C80: resumo null ou objeto vazio omite o evento", async () => {
+    const nulo = await semearEvento("camara:2", "2026-09-28T12:00:00Z", "senado:123:2026-05", null);
+    const vazio = await semearEvento("camara:2", "2026-09-28T12:00:00Z", "senado:123:2026-04", {});
+    try {
+      const ids = await idsFeed("/feed?tipos=consulta_publica");
+      expect(ids).not.toContain(nulo);
+      expect(ids).not.toContain(vazio);
+      expect(ids).toContain(idConsultaBase);
+    } finally {
+      await apagarEventos([nulo, vazio]);
+    }
+  });
+
+  test("C81: numeros congelados no evento, urlFonte vem da tabela", async () => {
+    const antes = (await itensConsulta("/feed?tipos=consulta_publica")).find((i) => i.id === idConsultaBase);
+    expect(antes?.votosSim).toBe(120);
+    const novaUrl = "https://www12.senado.leg.br/ecidadania/visualizacaomateria?id=123&nova=1";
+    try {
+      await sql`update consulta_publica set votos_sim = 999, votos_nao = 888, apurado_em = '2026-10-15T09:00:00Z', url_fonte = ${novaUrl}
+        where materia_cod = '9001'`;
+      const depois = (await itensConsulta("/feed?tipos=consulta_publica")).find((i) => i.id === idConsultaBase);
+      expect(depois?.votosSim).toBe(120);
+      expect(depois?.votosNao).toBe(30);
+      expect(depois?.apuradoEm).toBe("2026-09-28T10:00:00.000Z");
+      expect(depois?.urlFonte).toBe(novaUrl);
+    } finally {
+      await sql`update consulta_publica set votos_sim = 120, votos_nao = 30, apurado_em = '2026-09-28T10:00:00Z', url_fonte = ${URL_CONSULTA_BASE}
+        where materia_cod = '9001'`;
+    }
+  });
+
+  test("C82: urlFonte e exatamente consulta_publica.url_fonte, nunca nulo ou vazio", async () => {
+    const itens = await itensConsulta("/feed?tipos=consulta_publica");
+    expect(itens.length).toBeGreaterThan(0);
+    for (const i of itens) {
+      expect(typeof i.urlFonte).toBe("string");
+      expect(i.urlFonte.length).toBeGreaterThan(0);
+      expect(i.urlFonte).toStartWith("https://www12.senado.leg.br/");
+    }
+    expect(itens.find((i) => i.id === idConsultaBase)?.urlFonte).toBe(URL_CONSULTA_BASE);
+  });
+
+  test("C83: tipos=consulta_publica devolve so consultas", async () => {
+    const { ids, paginas } = await percorrer("/feed?tipos=consulta_publica");
+    const itens = paginas.flatMap((p) => p.itens);
+    expect(itens.length).toBeGreaterThan(0);
+    for (const i of itens) expect(i.tipo).toBe("consulta_publica");
+    expect(ids).toEqual(await idsEsperados(sql`and tipo = 'consulta_publica'`));
+  });
+
+  test("C84: paginacao por cursor com mais de 30 consultas nao pula nem duplica", async () => {
+    const N = 36;
+    try {
+      for (let i = 0; i < N; i++) {
+        await semearProposicaoConsulta(String(i));
+        // grupos de 12 no mesmo dia; dentro do grupo, metade separada por 1 µs
+        const quando = `2026-08-0${1 + Math.floor(i / 12)}T10:00:00.000${i % 2 === 0 ? "000" : "001"}Z`;
+        await semearEvento("camara:2", quando, `camara:cp${i}:2026-08`, RESUMO_OK);
+      }
+      const esperado = await idsEsperados(sql`and tipo = 'consulta_publica'`);
+      expect(esperado.length).toBe(N + 1);
+      const { ids, paginas } = await percorrer("/feed?tipos=consulta_publica");
+      expect(paginas.length).toBeGreaterThanOrEqual(2);
+      expect(ids).toEqual(esperado);
+      expect(new Set(ids).size).toBe(ids.length);
+    } finally {
+      await limparSemeadas();
+    }
+  });
+
+  test("C85: evento omitido no meio e no fim da pagina nao repete nem trava o cursor", async () => {
+    const legados: string[] = [];
+    try {
+      let valido = 0;
+      for (let k = 0; k < 37; k++) {
+        const quando = new Date(Date.UTC(2026, 6, 1, 12, 0) - k * 60_000).toISOString();
+        if (k === 9 || k === 28) {
+          // k = 28 é o 30º evento cru: o último da primeira página
+          legados.push(await semearEvento("camara:2", quando, k === 9 ? "2026-07" : "2026-06", RESUMO_OK));
+        } else {
+          await semearProposicaoConsulta(String(valido));
+          await semearEvento("camara:2", quando, `camara:cp${valido}:2026-07`, RESUMO_OK);
+          valido++;
+        }
+      }
+      const todos = await idsEsperados(sql`and tipo = 'consulta_publica'`);
+      expect(todos.length).toBe(38);
+      const esperado = todos.filter((id) => !legados.includes(id));
+      const { ids, paginas } = await percorrer("/feed?tipos=consulta_publica");
+      expect(paginas[0]!.itens.length).toBe(28);
+      expect(paginas[0]!.proximo).not.toBeNull();
+      expect(ids).toEqual(esperado);
+      expect(new Set(ids).size).toBe(ids.length);
+    } finally {
+      await apagarEventos(legados);
+      await limparSemeadas();
+    }
+  });
+
+  test("C86: duas apuracoes da mesma proposicao viram um card com a url da mais recente", async () => {
+    try {
+      await sql`insert into proposicao (id, casa, id_externo, sigla_tipo, numero, ano) values ('camara:cpdup', 'camara', 'cpdup', 'PL', 77, 2026)`;
+      await sql`insert into consulta_publica (materia_cod, proposicao_id, votos_sim, votos_nao, apurado_em, url_fonte) values
+        ('cpdm2', 'camara:cpdup', 9, 9, '2026-09-20T00:00:00Z', 'https://www12.senado.leg.br/ecidadania/visualizacaomateria?id=nova'),
+        ('cpdm1', 'camara:cpdup', 1, 1, '2026-09-01T00:00:00Z', 'https://www12.senado.leg.br/ecidadania/visualizacaomateria?id=velha')`;
+      await semearEvento("camara:2", "2026-09-27T12:00:00Z", "camara:cpdup:2026-09", RESUMO_OK);
+      const dup = (await itensConsulta("/feed?tipos=consulta_publica")).filter((i) => i.proposicao.id === "camara:cpdup");
+      expect(dup.length).toBe(1);
+      expect(dup[0]!.urlFonte).toBe("https://www12.senado.leg.br/ecidadania/visualizacaomateria?id=nova");
+    } finally {
+      await limparSemeadas();
+    }
+  });
+
+  test("C87: tipo invalido em tipos responde 400 listando os 4 tipos", async () => {
+    const { status, body } = await get<{ erro: string }>("/feed?tipos=voto,discurso");
+    expect(status).toBe(400);
+    expect(body.erro).toContain("voto");
+    expect(body.erro).toContain("proposicao");
+    expect(body.erro).toContain("despesa_mensal");
+    expect(body.erro).toContain("consulta_publica");
+  });
+
+  test("C88: os 4 tipos explicitos devolvem o mesmo conjunto que sem tipos", async () => {
+    const sem = await idsFeed("/feed");
+    const explicitos = await idsFeed("/feed?tipos=voto,proposicao,despesa_mensal,consulta_publica");
+    expect(explicitos).toEqual(sem);
+    expect(sem).toEqual(await idsEsperados());
+  });
+
+  test("C89: sem tipos a resposta contem os 4 tipos", async () => {
+    const { paginas } = await percorrer("/feed");
+    expect(new Set(paginas.flatMap((p) => p.itens.map((i) => i.tipo)))).toEqual(new Set(TIPOS_FEED));
+  });
+
+  test("C90: item de consulta tem so as chaves do contrato", async () => {
+    const item = (await itensConsulta("/feed?tipos=consulta_publica")).find((i) => i.id === idConsultaBase);
+    expect(Object.keys(item!).sort()).toEqual(
+      ["apuradoEm", "id", "ocorridoEm", "parlamentar", "proposicao", "tipo", "urlFonte", "votosNao", "votosSim"].sort(),
+    );
+    expect(item!.ocorridoEm).toBe("2026-09-28T12:00:00.000Z");
+  });
+
+  test("C91: feed do parlamentar traz a consulta do autor e nao a de outro", async () => {
+    const autor = await get<Pagina<FeedItem>>("/parlamentares/camara:1/feed?tipos=consulta_publica");
+    expect(autor.status).toBe(200);
+    expect(autor.body.itens.map((i) => i.id)).toEqual([idConsultaBase]);
+    const outro = await get<Pagina<FeedItem>>("/parlamentares/camara:3/feed?tipos=consulta_publica");
+    expect(outro.status).toBe(200);
+    expect(outro.body.itens).toEqual([]);
   });
 });
 
