@@ -163,8 +163,9 @@ coletivo dizer o contrário na issue.
 |---|---|
 | `packages/core` | Aditiva: tabela `consulta_publica` (`materia_cod`, `proposicao_id`, `votos_sim`, `votos_nao`, `apurado_em`, `url_fonte`) e valor `consulta_publica` em `evento_tipo`; `FeedItemConsulta` na união `FeedItem`. |
 | `apps/ingest` | `buscarTexto` em `http.ts` (mesma fila, backoff e UA); parser puro com testes e fixtures; `senado/consultas.ts` com teto e intervalo, cursor `senado:consultas`. Falha de leitura pula e loga, nunca grava zero. |
-| `apps/api` | `consulta_publica` em `TIPOS` e `montarItens`; testes em `app.test.ts`. |
-| `apps/web` | Card de consulta (sim e não com texto e ícone, totais pt-BR, "Votos apurados até", aviso, link oficial) e chip "Consultas". |
+| `apps/api` | `consulta_publica` em `TIPOS` (`tipos=` aceita o valor; os quatro juntos = sem filtro). O item lê votos e `apuradoEm` do `resumo` do evento (congelados na leitura) e o `urlFonte` de `consulta_publica.url_fonte`; com mais de uma linha para a mesma proposição vale a de `apurado_em` mais recente. `ref_id` é `<proposicao_id>:<AAAA-MM>`, partido no último `:`. Evento com `ref_id` fora do formato, `resumo` inválido ou consulta/proposição ausente é omitido sem quebrar o cursor. O select de eventos só ganhou a coluna `resumo`, sem join novo. Sem índice em `consulta_publica.proposicao_id`: com 5 mil linhas o seq scan da página e do `on delete cascade` fica abaixo de 1 ms, e o export lê a tabela inteira de qualquer forma; reavaliar se a tabela passar de ~100 mil linhas. |
+| `apps/export` | Fluxo `consulta_publica` no export estático (`feed/<id>/consulta_publica/` e `feed/geral/consulta_publica/`), com a mesma regra de parse, validação e consulta mais recente da API. |
+| `apps/web` | Modo estático: remonta o item de consulta e trata 404 do fluxo `consulta_publica` como fluxo vazio (site publicado antes do fluxo existir continua carregando os outros tipos). Card de consulta (sim e não com texto e ícone, totais pt-BR, "Votos apurados até", aviso, link oficial) e chip "Consultas". |
 
 ## Rascunho da issue (upstream)
 
