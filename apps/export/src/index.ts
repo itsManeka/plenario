@@ -399,6 +399,8 @@ async function main() {
     voto: hidratadorVoto(parls, votacoes),
     proposicao: hidratadorProposicao(parls),
     despesa_mensal: hidratadorDespesa(parls),
+    // sem export estatico de consulta ainda
+    consulta_publica: async function* () {},
   };
   for (const tipo of TIPOS_FEED) {
     await etapa(`feed ${tipo}`, async () => {

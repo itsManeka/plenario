@@ -93,7 +93,15 @@ export interface FeedItemDespesaMensal extends FeedItemBase {
   porCategoria: { categoria: string; valor: number }[]; // ordenado desc, no máx. 5
 }
 
-export type FeedItem = FeedItemVoto | FeedItemProposicao | FeedItemDespesaMensal;
+export interface FeedItemConsulta extends FeedItemBase {
+  tipo: "consulta_publica";
+  proposicao: ProposicaoResumo;
+  votosSim: number;
+  votosNao: number;
+  apuradoEm: string; // ISO-8601 UTC
+}
+
+export type FeedItem = FeedItemVoto | FeedItemProposicao | FeedItemDespesaMensal | FeedItemConsulta;
 export type FeedItemTipo = FeedItem["tipo"];
 
 export interface Pagina<T> {

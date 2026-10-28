@@ -232,7 +232,7 @@ async function montarItens(eventos: LinhaEvento[]): Promise<FeedItem[]> {
       if (!proposicao) continue;
       const papel = papelAutoria(autoriaPor.get(chave(e.ref_id, e.parlamentar_id)));
       itens.push({ ...base, urlFonte: urlFonteProposicao(proposicao, perfil), tipo: "proposicao", papel, proposicao });
-    } else {
+    } else if (e.tipo === "despesa_mensal") {
       const m = e.ref_id.match(RE_MES);
       if (!m) continue;
       const ano = Number(m[1]);

@@ -249,6 +249,9 @@ export function FeedCard({ item }: { item: FeedItem }) {
       return <CardProposicao item={item} />;
     case "despesa_mensal":
       return <CardDespesa item={item} />;
+    // provisorio: CardConsulta entra em f06
+    case "consulta_publica":
+      return null;
   }
 }
 

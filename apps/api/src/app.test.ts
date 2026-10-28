@@ -32,7 +32,7 @@ const parlamentares = [
 const N_ENCHIMENTO = 70;
 
 beforeAll(async () => {
-  await sql`truncate evento, despesa, voto, votacao, exercicio, proposicao_autor, proposicao, parlamentar restart identity cascade`;
+  await sql`truncate evento, despesa, voto, votacao, exercicio, proposicao_autor, consulta_publica, proposicao, parlamentar restart identity cascade`;
 
   for (const [id, nome, civil, partido, uf] of parlamentares) {
     const [casa, ext] = id.split(":");
@@ -283,6 +283,22 @@ describe("feed", () => {
     expect(ids).toEqual(esperado);
     const proprio = await percorrer("/parlamentares/camara:3/feed");
     expect(proprio.ids).toEqual(await idsEsperados(sql`and parlamentar_id = 'camara:3'`));
+  });
+
+  test("evento consulta_publica nao vira card nem despesa_mensal", async () => {
+    // ref_id no formato AAAA-MM: o ramo else antigo (despesa) aceitaria esse valor
+    const [ins] = await sql<{ id: string }[]>`insert into evento (parlamentar_id, tipo, ocorrido_em, ref_id)
+      values ('camara:1', 'consulta_publica', '2026-09-30T12:00:00Z', '2026-09')
+      returning id::text as id`;
+    try {
+      const { ids, paginas } = await percorrer("/feed");
+      expect(ids).not.toContain(ins!.id);
+      expect(new Set(paginas.flatMap((p) => p.itens.map((i) => i.tipo)))).toEqual(
+        new Set(["voto", "proposicao", "despesa_mensal"] as const),
+      );
+    } finally {
+      await sql`delete from evento where id = ${ins!.id}::bigint`;
+    }
   });
 
   test("filtro por tipos", async () => {
