@@ -135,6 +135,15 @@ function remontar(
         total: c.total,
         porCategoria: c.porCategoria,
       };
+    case "consulta_publica":
+      return {
+        ...base,
+        tipo: "consulta_publica",
+        proposicao: c.proposicao,
+        votosSim: c.votosSim,
+        votosNao: c.votosNao,
+        apuradoEm: c.apuradoEm,
+      };
   }
 }
 

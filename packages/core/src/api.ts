@@ -147,6 +147,8 @@ export interface PartidoResumo {
 //   GET /parlamentares/:id/feed?tipos=&cursor=                 -> Pagina<FeedItem>
 //   GET /feed?parlamentares=id1,id2&tipos=voto,proposicao&cursor=  -> Pagina<FeedItem>
 //        até 200 ids; sem `parlamentares` = feed geral (todas as casas)
+//        tipos: lista separada por vírgula de voto, proposicao, despesa_mensal, consulta_publica;
+//        ausente = todos os tipos; valor fora da lista = 400
 //   GET /votacoes/:id                    -> VotacaoDetalhe
 //   GET /proposicoes/:id                 -> ProposicaoDetalhe
 //   GET /partidos                        -> PartidoResumo[]
