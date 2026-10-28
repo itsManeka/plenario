@@ -1,15 +1,20 @@
 // Ingest do Senado Federal (Dados Abertos, https://legis.senado.leg.br/dadosabertos/).
 //
 // Ordem: parlamentares -> votações (+ votos e eventos "voto") -> proposições de autoria
-// (+ autores e eventos "proposicao"). Tudo é upsert, então rodar de novo o mesmo período não
-// duplica nada. Cursores em `ingest_cursor`:
+// (+ autores e eventos "proposicao") -> consultas públicas (+ `consulta_publica` e eventos
+// "consulta_publica"; lê a página do e-Cidadania, sem API). Tudo é upsert, então rodar de novo
+// o mesmo período não duplica nada. Cursores em `ingest_cursor`:
 //   senado:parlamentares  último sync da lista
 //   senado:votacoes       { ate: AAAA-MM-DD } última data de sessão coberta
 //   senado:proposicoes    { ate: AAAA-MM-DD } última data de apresentação coberta
-// Sem --desde, cada fonte retoma do próprio cursor com 7 dias de folga (a fonte publica
-// votação e autoria com atraso de alguns dias), ou do início da 57ª legislatura.
+//   senado:consultas      { puladas: {cod: {em, motivo}}, contagem: {lidas, puladas, eventos, falhas},
+//                           abortou, em } rodízio por apuração (não por data): --desde/--ate NÃO
+//                           afetam as consultas
+// Sem --desde, votações e proposições retomam do próprio cursor com 7 dias de folga (a fonte
+// publica votação e autoria com atraso de alguns dias), ou do início da 57ª legislatura.
 
 import type { OpcoesIngest } from "../index";
+import { FONTE_CURSOR_CONSULTAS, sincronizarConsultas } from "./consultas";
 import { gravarCursor, lerCursor } from "./cursor";
 import { completarPartidos, sincronizarParlamentares } from "./parlamentares";
 import { sincronizarProposicoes } from "./proposicoes";
@@ -58,6 +63,19 @@ export async function run(opcoes: OpcoesIngest): Promise<void> {
   } else {
     log(`proposições: nada a fazer (desde ${desdeProp} > até ${ate})`);
   }
+
+  const rc = await sincronizarConsultas();
+  await gravarCursor(FONTE_CURSOR_CONSULTAS, {
+    puladas: rc.registroPuladas,
+    contagem: { lidas: rc.lidas, puladas: rc.puladas, eventos: rc.eventos, falhas: rc.falhas },
+    abortou: rc.abortou,
+    em: new Date().toISOString(),
+  });
+  log(
+    `consultas: ${rc.lidas} lidas, ${rc.puladas} puladas, ${rc.eventos} eventos` +
+      (rc.falhas ? `, ${rc.falhas} falhas` : "") +
+      (rc.abortou ? " (rodada abortada: falhas seguidas)" : ""),
+  );
 
   log(`concluído em ${((performance.now() - t0) / 1000).toFixed(1)}s`);
 }

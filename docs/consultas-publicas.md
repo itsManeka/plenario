@@ -131,7 +131,12 @@ coletivo dizer o contrário na issue.
 6. **Frequência:** até 500 matérias por execução do ingest diário, 1 requisição por segundo
    (~8 min, ~78 MB), a de apuração mais antiga primeiro; a que nunca foi lida vem antes de todas
    (rodízio, para cobrir a base ao longo dos dias). Uma volta leva no máximo ~10 dias: 5.023 é o
-   teto das elegíveis no Senado, e só as já ingeridas entram. Configurável por variável de ambiente.
+   teto das elegíveis no Senado, e só as já ingeridas entram. Configurável por variável de ambiente:
+   `INGEST_CONSULTAS_MAX` (teto, padrão 500) e `INGEST_CONSULTAS_INTERVALO_MS` (intervalo, padrão
+   1000). Matéria encerrada ou inexistente (redirecionamento 301/302/303/307/308) fica registrada no
+   cursor `senado:consultas` e só volta à seleção depois de 30 dias, para não ocupar o teto todo dia.
+   Depois de 10 falhas seguidas (rede, status, template alterado, leitura inválida) a execução
+   para as consultas e loga; pulo esperado não conta e uma leitura boa zera a contagem.
 7. **Endpoint oficial:** pedir ao Senado em paralelo (texto abaixo). O envio fica com quem mantém o
    projeto; o epic não depende da resposta.
 8. **Novo valor em `evento_tipo`:** o push puro basta, sem linha nova em `sql/extra.sql`. Teste
