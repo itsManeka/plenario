@@ -9,6 +9,7 @@ import { buscarTexto } from "../http";
 import { criarThrottleConsultas } from "../throttle";
 import { lerConsulta, urlConsulta } from "./consulta_parser";
 import {
+  DIAS_PULO_POR_MOTIVO,
   classificarResposta,
   deveAbortar,
   devePularPorRegistro,
@@ -20,6 +21,7 @@ import {
   type AutorOrdem,
   type Candidata,
   type Desfecho,
+  type MotivoRegistro,
   type Puladas,
 } from "./consultas_regras";
 import { lerCursor } from "./cursor";
@@ -51,26 +53,52 @@ interface CandidataLinha extends Candidata {
   idExterno: string;
 }
 
+const CHAVE_COD = /^[1-9][0-9]*$/;
+
+const ehMotivoRegistro = (m: unknown): m is MotivoRegistro =>
+  typeof m === "string" && Object.hasOwn(DIAS_PULO_POR_MOTIVO, m);
+
+/**
+ * Chave que nao e inteiro positivo em texto e descartada (a defesa contra `__proto__` e afins e essa
+ * validacao: `podarPuladas` devolve um objeto comum).
+ */
 function puladasDoCursor(estado: Record<string, unknown> | null): Puladas {
+  const saida: Puladas = Object.create(null) as Puladas;
   const bruto = estado?.puladas;
-  if (typeof bruto !== "object" || bruto === null || Array.isArray(bruto)) return {};
-  const saida: Puladas = {};
+  if (typeof bruto !== "object" || bruto === null || Array.isArray(bruto)) return saida;
   for (const [cod, r] of Object.entries(bruto as Record<string, unknown>)) {
+    if (!CHAVE_COD.test(cod)) continue;
     if (typeof r !== "object" || r === null) continue;
     const { em, motivo } = r as { em?: unknown; motivo?: unknown };
     if (typeof em !== "string" || Number.isNaN(Date.parse(em))) continue;
-    if (motivo !== "encerrada" && motivo !== "materia_inexistente") continue;
+    if (!ehMotivoRegistro(motivo)) continue;
     saida[cod] = { em, motivo };
   }
   return saida;
 }
 
-export async function sincronizarConsultas(): Promise<ResultadoConsultas> {
+const MAX_MSG_ERRO = 200;
+
+/** `name: message` cortada; sem o trecho `params:` que o drizzle anexa a "Failed query". */
+function descreverErro(e: unknown): string {
+  const nome = e instanceof Error ? e.name : "NaoError";
+  const msg = e instanceof Error ? e.message : String(e);
+  const i = msg.search(/[\n ]params:/);
+  return `${nome}: ${(i >= 0 ? msg.slice(0, i) : msg).slice(0, MAX_MSG_ERRO)}`;
+}
+
+/**
+ * `parcial` (opcional) e preenchido durante a rodada: se o sync lancar, quem chama ainda tem os pulos
+ * e contadores ja registrados para gravar no cursor.
+ */
+export async function sincronizarConsultas(parcial?: { atual?: ResultadoConsultas }): Promise<ResultadoConsultas> {
   const agora = new Date();
   const teto = lerTetoConsultas(process.env);
   const estado = await lerCursor(FONTE_CURSOR_CONSULTAS);
   const registro = podarPuladas(puladasDoCursor(estado), agora);
 
+  // Carrega todas as proposicoes do Senado e ordena em memoria (ok ate ~5 mil); se crescer, mover a
+  // ordem (nunca lidas primeiro, apuradoEm mais antigo) para SQL com ORDER BY ... NULLS FIRST.
   const linhas = await db
     .select({
       proposicaoId: schema.proposicao.id,
@@ -115,13 +143,21 @@ export async function sincronizarConsultas(): Promise<ResultadoConsultas> {
   let seguidas = 0;
   let abortou = false;
 
+  const publicar = (): void => {
+    if (!parcial) return;
+    parcial.atual = { lidas, puladas, eventos, falhas, abortou, registroPuladas: novasPuladas };
+  };
+  publicar();
+
+  const registrar = (cod: string, motivo: MotivoRegistro): void => {
+    novasPuladas[cod] = { em: new Date().toISOString(), motivo };
+  };
   const pular = (cod: string, motivo: string): Desfecho => {
     puladas++;
     log(`consultas: pulou ${cod} (${motivo})`);
     return "pulo_esperado";
   };
   const falhar = (cod: string, motivo: string): Desfecho => {
-    puladas++;
     falhas++;
     log(`consultas: falhou ${cod} (${motivo})`);
     return "falha";
@@ -137,23 +173,21 @@ export async function sincronizarConsultas(): Promise<ResultadoConsultas> {
     try {
       await throttle.esperar();
       const resp = await buscarTexto(urlConsulta(cod));
-      const cls = classificarResposta(resp, cod);
+      const cls = classificarResposta(resp);
       if (cls.acao === "pular") {
         desfecho = pular(c.idExterno, cls.motivo);
-        if (cls.motivo === "materia_inexistente") {
-          novasPuladas[c.idExterno] = { em: new Date().toISOString(), motivo: "materia_inexistente" };
-        }
+        registrar(c.idExterno, cls.motivo === "materia_inexistente" ? "materia_inexistente" : "falha_leitura");
       } else {
         const r = lerConsulta(cls.html, cod);
         if (r.tipo === "sem_dado") {
           desfecho = pular(c.idExterno, `sem_dado:${r.motivo}`);
-          if (r.motivo === "encerrada") {
-            novasPuladas[c.idExterno] = { em: new Date().toISOString(), motivo: "encerrada" };
-          }
+          if (r.motivo === "encerrada") registrar(c.idExterno, "encerrada");
+          else if (r.motivo === "sem_apuracao") registrar(c.idExterno, "sem_apuracao");
         } else {
           const v = leituraDoResultado(r, cod);
           if (!v.ok) {
             desfecho = falhar(c.idExterno, v.motivo);
+            registrar(c.idExterno, "falha_leitura");
           } else {
             const evento = montarEvento({
               proposicaoId: c.proposicaoId,
@@ -207,11 +241,13 @@ export async function sincronizarConsultas(): Promise<ResultadoConsultas> {
         }
       }
     } catch (e) {
-      desfecho = falhar(c.idExterno, e instanceof Error ? e.message : String(e));
+      desfecho = falhar(c.idExterno, descreverErro(e));
+      registrar(c.idExterno, "falha_leitura");
     }
     seguidas = proximaContagemFalhas(seguidas, desfecho);
-    if (deveAbortar(seguidas)) {
-      abortou = true;
+    abortou = deveAbortar(seguidas);
+    publicar();
+    if (abortou) {
       log(`consultas: abortou a rodada apos ${seguidas} falhas seguidas`);
       break;
     }

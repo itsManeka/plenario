@@ -17,7 +17,7 @@ export type ClassificacaoResposta =
 const STATUS_MATERIA_INEXISTENTE: ReadonlySet<number> = new Set([301, 302, 303, 307, 308]);
 
 /** Qualquer outro 3xx (300, 304...) nao prova inexistencia: pula com motivo proprio. */
-export function classificarResposta(resp: RespostaTexto, _cod: number): ClassificacaoResposta {
+export function classificarResposta(resp: RespostaTexto): ClassificacaoResposta {
   if (resp.tipo === "ok") return { acao: "ler", html: resp.corpo };
   return {
     acao: "pular",
@@ -49,7 +49,7 @@ function urlFonteValida(urlFonte: string): boolean {
   return u.protocol === "https:" && u.host === HOST_FONTE && u.username === "" && u.password === "";
 }
 
-const contagemValida = (n: number): boolean => Number.isInteger(n) && n >= 0;
+const contagemValida = (n: number): boolean => Number.isSafeInteger(n) && n >= 0;
 
 export function validarLeitura(l: Leitura): ValidacaoLeitura {
   if (!Number.isSafeInteger(l.cod) || l.cod <= 0) return { ok: false, motivo: "codigo invalido" };
@@ -149,19 +149,30 @@ export function ordenarCandidatas<T extends Candidata>(candidatas: readonly T[])
 // ---------- pulo registrado no cursor (A2) ----------
 
 export const DIAS_PULO = 30;
+export const DIAS_PULO_CURTO = 3;
 const MS_DIA = 24 * 3600 * 1000;
+
+export type MotivoRegistro = "encerrada" | "materia_inexistente" | "sem_apuracao" | "falha_leitura";
+
+/** Prazo do pulo por motivo: estado duradouro = 30 dias; sem apuracao ou falha de leitura = 3 dias. */
+export const DIAS_PULO_POR_MOTIVO: Readonly<Record<MotivoRegistro, number>> = {
+  encerrada: DIAS_PULO,
+  materia_inexistente: DIAS_PULO,
+  sem_apuracao: DIAS_PULO_CURTO,
+  falha_leitura: DIAS_PULO_CURTO,
+};
 
 export interface RegistroPulo {
   em: string; // ISO
-  motivo: "encerrada" | "materia_inexistente";
+  motivo: MotivoRegistro;
 }
 
 export type Puladas = Record<string, RegistroPulo>;
 
 const vencido = (r: RegistroPulo, agora: Date): boolean =>
-  agora.getTime() - Date.parse(r.em) >= DIAS_PULO * MS_DIA;
+  agora.getTime() - Date.parse(r.em) >= DIAS_PULO_POR_MOTIVO[r.motivo] * MS_DIA;
 
-/** Registro vigente (menos de 30 dias) = pula; sem registro ou vencido = nao pula. */
+/** Registro vigente (dentro do prazo do motivo) = pula; sem registro ou vencido = nao pula. */
 export function devePularPorRegistro(registro: RegistroPulo | undefined, agora: Date): boolean {
   return registro !== undefined && !vencido(registro, agora);
 }

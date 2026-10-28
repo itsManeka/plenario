@@ -135,6 +135,8 @@ coletivo dizer o contrário na issue.
    `INGEST_CONSULTAS_MAX` (teto, padrão 500) e `INGEST_CONSULTAS_INTERVALO_MS` (intervalo, padrão
    1000). Matéria encerrada ou inexistente (redirecionamento 301/302/303/307/308) fica registrada no
    cursor `senado:consultas` e só volta à seleção depois de 30 dias, para não ocupar o teto todo dia.
+   Matéria sem apuração ou cuja leitura falhou (template alterado, leitura inválida, rede/status)
+   fica registrada da mesma forma por 3 dias.
    Depois de 10 falhas seguidas (rede, status, template alterado, leitura inválida) a execução
    para as consultas e loga; pulo esperado não conta e uma leitura boa zera a contagem.
 7. **Endpoint oficial:** pedir ao Senado em paralelo (texto abaixo). O envio fica com quem mantém o

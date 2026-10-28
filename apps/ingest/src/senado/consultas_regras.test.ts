@@ -56,10 +56,12 @@ describe("montarEvento", () => {
       autores,
       leitura: leituraOk({ apuradoEm: new Date("2026-11-15T12:00:00Z") }),
     });
-    expect(a?.refId).toBe("senado:p9:2026-10");
-    expect(b?.refId).toBe(a?.refId as string);
-    expect(b?.parlamentarId).toBe("senado:1");
-    expect(outroMes?.refId).toBe("senado:p9:2026-11");
+    if (!a || !b || !outroMes) throw new Error("evento esperado");
+    expect(a.refId).toBe("senado:p9:2026-10");
+    expect(b.refId).toBe(a.refId);
+    expect(b.parlamentarId).toBe(a.parlamentarId);
+    expect(b.parlamentarId).toBe("senado:1");
+    expect(outroMes.refId).toBe("senado:p9:2026-11");
   });
 
   test("C30: sem primeiro signatario devolve null", () => {
@@ -99,14 +101,14 @@ describe("classificarResposta", () => {
     const m = /^HTTP\/\d(?:\.\d)?\s+(\d{3})/.exec(fxTexto("p999999999.hdr"));
     expect(m).not.toBeNull();
     const status = Number(m?.[1]);
-    expect(classificarResposta(redir(status), 999999999)).toEqual({
+    expect(classificarResposta(redir(status))).toEqual({
       acao: "pular",
       motivo: "materia_inexistente",
     });
   });
 
   test("resposta ok devolve o html para leitura", () => {
-    expect(classificarResposta({ tipo: "ok", corpo: "<html>" }, 1)).toEqual({ acao: "ler", html: "<html>" });
+    expect(classificarResposta({ tipo: "ok", corpo: "<html>" })).toEqual({ acao: "ler", html: "<html>" });
   });
 
   test.each([
@@ -115,14 +117,14 @@ describe("classificarResposta", () => {
     ["C35", 307],
     ["C36", 308],
   ])("%s: status %i e materia_inexistente", (_id, status) => {
-    expect(classificarResposta(redir(status), 1)).toEqual({ acao: "pular", motivo: "materia_inexistente" });
+    expect(classificarResposta(redir(status))).toEqual({ acao: "pular", motivo: "materia_inexistente" });
   });
 
   test.each([
     ["C37", 300],
     ["C38", 304],
   ])("%s: status %i pula sem ser materia_inexistente", (_id, status) => {
-    const r = classificarResposta(redir(status), 1);
+    const r = classificarResposta(redir(status));
     expect(r.acao).toBe("pular");
     expect(r).not.toEqual({ acao: "pular", motivo: "materia_inexistente" });
   });
@@ -161,6 +163,13 @@ describe("validarLeitura", () => {
     expect(validarLeitura(leituraOk({ apuradoEm: new Date("invalido") })).ok).toBe(false);
     const zero = leituraOk({ votosSim: 0, votosNao: 0 });
     expect(validarLeitura(zero)).toEqual({ ok: true, leitura: zero });
+  });
+
+  test("contagem acima de MAX_SAFE_INTEGER e rejeitada em votosSim e em votosNao", () => {
+    const grande = Number.MAX_SAFE_INTEGER + 2;
+    expect(validarLeitura(leituraOk({ votosSim: grande })).ok).toBe(false);
+    expect(validarLeitura(leituraOk({ votosNao: grande })).ok).toBe(false);
+    expect(validarLeitura(leituraOk({ votosSim: Number.MAX_SAFE_INTEGER })).ok).toBe(true);
   });
 });
 
@@ -231,6 +240,26 @@ describe("pulo registrado", () => {
     const copia = { ...entrada };
     expect(Object.keys(podarPuladas(entrada, agora)).sort()).toEqual(["1", "3"]);
     expect(entrada).toEqual(copia);
+  });
+
+  test("prazo curto: sem_apuracao com 2 dias pula e com 4 nao", () => {
+    expect(devePularPorRegistro(reg(2, "sem_apuracao"), agora)).toBe(true);
+    expect(devePularPorRegistro(reg(4, "sem_apuracao"), agora)).toBe(false);
+  });
+
+  test("prazo curto: falha de leitura (template_alterado) com 2 dias pula e com 4 nao", () => {
+    expect(devePularPorRegistro(reg(2, "falha_leitura"), agora)).toBe(true);
+    expect(devePularPorRegistro(reg(4, "falha_leitura"), agora)).toBe(false);
+  });
+
+  test("poda remove o curto vencido e mantem o de 30 dias ainda valido", () => {
+    const entrada = {
+      "1": reg(4, "sem_apuracao"),
+      "2": reg(10, "encerrada"),
+      "3": reg(4, "falha_leitura"),
+      "4": reg(2, "falha_leitura"),
+    };
+    expect(Object.keys(podarPuladas(entrada, agora)).sort()).toEqual(["2", "4"]);
   });
 });
 

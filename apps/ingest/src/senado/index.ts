@@ -14,7 +14,7 @@
 // publica votação e autoria com atraso de alguns dias), ou do início da 57ª legislatura.
 
 import type { OpcoesIngest } from "../index";
-import { FONTE_CURSOR_CONSULTAS, sincronizarConsultas } from "./consultas";
+import { FONTE_CURSOR_CONSULTAS, sincronizarConsultas, type ResultadoConsultas } from "./consultas";
 import { gravarCursor, lerCursor } from "./cursor";
 import { completarPartidos, sincronizarParlamentares } from "./parlamentares";
 import { sincronizarProposicoes } from "./proposicoes";
@@ -28,6 +28,15 @@ async function inicio(fonte: string, opcoes: OpcoesIngest): Promise<string> {
   const cursor = await lerCursor(fonte);
   if (!cursor?.ate) return INICIO_LEGISLATURA;
   return maiorData(INICIO_LEGISLATURA, somarDias(cursor.ate, -FOLGA_DIAS));
+}
+
+function gravarConsultas(rc: ResultadoConsultas): Promise<void> {
+  return gravarCursor(FONTE_CURSOR_CONSULTAS, {
+    puladas: rc.registroPuladas,
+    contagem: { lidas: rc.lidas, puladas: rc.puladas, eventos: rc.eventos, falhas: rc.falhas },
+    abortou: rc.abortou,
+    em: new Date().toISOString(),
+  });
 }
 
 export async function run(opcoes: OpcoesIngest): Promise<void> {
@@ -64,13 +73,22 @@ export async function run(opcoes: OpcoesIngest): Promise<void> {
     log(`proposições: nada a fazer (desde ${desdeProp} > até ${ate})`);
   }
 
-  const rc = await sincronizarConsultas();
-  await gravarCursor(FONTE_CURSOR_CONSULTAS, {
-    puladas: rc.registroPuladas,
-    contagem: { lidas: rc.lidas, puladas: rc.puladas, eventos: rc.eventos, falhas: rc.falhas },
-    abortou: rc.abortou,
-    em: new Date().toISOString(),
-  });
+  // `parcial` guarda o que o sync ja registrou: se ele lancar, os pulos da rodada nao se perdem.
+  const parcial: { atual?: ResultadoConsultas } = {};
+  let rc: ResultadoConsultas;
+  try {
+    rc = await sincronizarConsultas(parcial);
+  } catch (e) {
+    if (parcial.atual) {
+      try {
+        await gravarConsultas(parcial.atual);
+      } catch (eCursor) {
+        log(`consultas: falha ao gravar o cursor parcial (${eCursor instanceof Error ? eCursor.name : "erro"})`);
+      }
+    }
+    throw e;
+  }
+  await gravarConsultas(rc);
   log(
     `consultas: ${rc.lidas} lidas, ${rc.puladas} puladas, ${rc.eventos} eventos` +
       (rc.falhas ? `, ${rc.falhas} falhas` : "") +
