@@ -1,5 +1,5 @@
-import { describe, expect, it } from "bun:test";
-import { criarThrottle, lerIntervaloConsultas } from "./throttle";
+import { afterEach, describe, expect, it } from "bun:test";
+import { criarThrottle, criarThrottleConsultas, lerIntervaloConsultas } from "./throttle";
 
 // Relogio falso: dormir avanca o tempo ate o alvo (assincrono, para expor corrida entre chamadas).
 function relogioFalso() {
@@ -41,6 +41,30 @@ describe("criarThrottle", () => {
     for (let i = 1; i < marcas.length; i++) {
       expect(marcas[i]! - marcas[i - 1]!).toBeGreaterThanOrEqual(100);
     }
+  });
+});
+
+describe("criarThrottleConsultas", () => {
+  const VAR = "INGEST_CONSULTAS_INTERVALO_MS";
+  const original = process.env[VAR];
+
+  afterEach(() => {
+    if (original === undefined) delete process.env[VAR];
+    else process.env[VAR] = original;
+  });
+
+  it("T6: le INGEST_CONSULTAS_INTERVALO_MS do env e espaca as chamadas", async () => {
+    process.env[VAR] = "250";
+    const rel = relogioFalso();
+    const th = criarThrottleConsultas(rel);
+    const marcas: number[] = [];
+    for (let i = 0; i < 3; i++) {
+      await th.esperar();
+      marcas.push(rel.agora());
+    }
+    expect(marcas[1]! - marcas[0]!).toBeGreaterThanOrEqual(250);
+    expect(marcas[2]! - marcas[1]!).toBeGreaterThanOrEqual(250);
+    expect(marcas[2]! - marcas[1]!).toBeLessThan(1000);
   });
 });
 

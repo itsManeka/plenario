@@ -88,6 +88,17 @@ contador 0/0 e nenhum `#msg-contabilizacao-voto`.
 5. Identidade: `input#materiaId` igual ao id pedido; senão erro (template mudou).
 6. Não seguir redirect: 302 = matéria inexistente. Não usar a largura da barra (vale 50% com 0 votos).
 
+Implementação (`apps/ingest/src/senado/consulta_parser.ts`, `apps/ingest/src/http.ts`):
+
+- O HTML não é confiável: nenhuma regex roda sobre a página inteira. Tags, aspas e comentários saem de
+  uma varredura linear única (como no HTML5: `<` só abre tag antes de letra, `/` ou `!`; aspa só delimita
+  valor logo após `=`; `<!--` sem `-->` vai até o fim). Página malformada termina rápido e vira
+  `template_alterado`, nunca placar.
+- `lerConsulta` nunca lança: devolve `ok`, `sem_dado` (`encerrada` | `sem_apuracao`) ou
+  `template_alterado` com `motivo`. `urlConsulta` lança `RangeError` para código que não é inteiro positivo.
+- `buscarTexto` lê no máximo 5 MiB (acima disso lança, sem nova tentativa), cancela o corpo que não vai ler
+  e devolve `redirecionada` para qualquer 3xx; quem chama decide quais status valem "matéria inexistente".
+
 Fixtures sugeridas: as páginas 160575 (milhar + comentários "10+"), 172395 (sem milhar), 176111
 (0/0 legítimo), 1181 (encerrada) e o cabeçalho do 302.
 

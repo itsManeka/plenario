@@ -22,6 +22,41 @@ function liberar() {
   fila.shift()?.();
 }
 
+const TETO_CORPO_TEXTO = 5 * 1024 * 1024;
+
+/** Libera a conexao de um corpo que nao sera lido. Falha ao cancelar nunca muda o desfecho. */
+async function descartarCorpo(res: Response): Promise<void> {
+  try {
+    await res.body?.cancel();
+  } catch {
+    // deliberado: o corpo ja nao interessa; o resultado da chamada nao depende do cancel.
+  }
+}
+
+/** Le o corpo em stream ate o teto; acima dele cancela o leitor e lanca. */
+async function lerTextoComTeto(res: Response, url: string): Promise<string> {
+  if (!res.body) return "";
+  const leitor = res.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let total = 0;
+  let texto = "";
+  for (;;) {
+    const { done, value } = await leitor.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > TETO_CORPO_TEXTO) {
+      try {
+        await leitor.cancel();
+      } catch {
+        // deliberado: o erro do teto e o que importa.
+      }
+      throw new Error(`corpo acima do teto de ${TETO_CORPO_TEXTO} bytes em ${url}`);
+    }
+    texto += decoder.decode(value, { stream: true });
+  }
+  return texto + decoder.decode();
+}
+
 interface OpcoesNucleo<R> {
   accept: string;
   redirect: RequestRedirect;
@@ -49,6 +84,7 @@ async function buscarNucleo<R>(url: string, tentativas: number, opts: OpcoesNucl
         continue;
       }
       if (res.ok) return await opts.lerOk(res);
+      await descartarCorpo(res);
       if ((res.status === 429 || res.status >= 500) && i < tentativas) {
         await Bun.sleep(500 * 2 ** i);
         continue;
@@ -78,7 +114,7 @@ export async function buscarTexto(url: string, tentativas = 5): Promise<Resposta
   return buscarNucleo<RespostaTexto>(url, tentativas, {
     accept: "text/html",
     redirect: "manual",
-    lerOk: async (res) => ({ tipo: "ok", corpo: await res.text() }),
+    lerOk: async (res) => ({ tipo: "ok", corpo: await lerTextoComTeto(res, url) }),
     lerNaoOk: (res) => {
       if (res.status >= 300 && res.status < 400) {
         return { tipo: "redirecionada", status: res.status };

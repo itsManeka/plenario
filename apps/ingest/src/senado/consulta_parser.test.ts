@@ -132,6 +132,143 @@ describe("lerConsulta", () => {
     );
   });
 
+  test("T4c1-a: template_alterado traz motivo (string nao vazia)", () => {
+    const r = lerConsulta("", 1);
+    expect(r.tipo).toBe("template_alterado");
+    const motivo = r.tipo === "template_alterado" ? r.motivo : "";
+    expect(typeof motivo).toBe("string");
+    expect(motivo.length).toBeGreaterThan(0);
+    expect("detalhe" in r).toBe(false);
+  });
+
+  test("T4c1-b: HTML adversarial sem '>' termina rapido e e template_alterado", () => {
+    const entradas = [
+      "<input ".repeat(50_000),
+      "<a".repeat(80_000),
+      '<div id="msg-contabilizacao-voto" '.repeat(5000),
+      '<input id="materiaId" value="1">\n<div id="msg-contabilizacao-voto">lixo' +
+        '<div id="msg-contabilizacao-voto" '.repeat(5000) +
+        "</div>",
+      // aspa aberta e reaberta sem fechar a tag
+      '<input title="'.repeat(50_000),
+      // comentario aberto repetido, nunca fechado
+      "<!--".repeat(80_000),
+    ];
+    for (const html of entradas) {
+      const t0 = performance.now();
+      const r = lerConsulta(html, 1);
+      const ms = performance.now() - t0;
+      expect(r.tipo).toBe("template_alterado");
+      expect(ms).toBeLessThan(2000);
+    }
+  });
+
+  test("T4c2-a: msg-contabilizacao-voto com divs nunca fechados termina rapido e e sem_apuracao", () => {
+    const html =
+      '<input id="materiaId" value="1">\n<div id="msg-contabilizacao-voto">' + "<div>".repeat(50_000);
+    const t0 = performance.now();
+    const r = lerConsulta(html, 1);
+    const ms = performance.now() - t0;
+    expect(r).toEqual({ tipo: "sem_dado", motivo: "sem_apuracao" });
+    expect(ms).toBeLessThan(2000);
+  });
+
+  test("T4c2-b: '<' e '>' dentro de valor de atributo entre aspas nao cortam a tag", () => {
+    const html = troca(fx("p160575"), 'id="materiaId"', 'id="materiaId" title="a<b>c"');
+    expect(lerConsulta(html, 160575)).toMatchObject({
+      tipo: "ok",
+      votosSim: 721508,
+      votosNao: 1142443,
+    });
+    const encerrada =
+      '<input id="materiaId" value="1181"><div title="a<b>c" class="tramitacao-encerrada">x</div>';
+    expect(lerConsulta(encerrada, 1181)).toEqual({ tipo: "sem_dado", motivo: "encerrada" });
+  });
+
+  test("T4c2-c: '/' final nao autofecha div (HTML5): <div data-x=a/> abre um div", () => {
+    const html = troca(
+      fx("p160575"),
+      "Votos apurados até 28/10/2026 10:18:46</div>",
+      "<div data-x=a/>Votos apurados até </div>28/10/2026 10:18:46</div>",
+    );
+    expect(lerConsulta(html, 160575)).toMatchObject({
+      tipo: "ok",
+      apuradoEm: new Date("2026-10-28T13:18:46.000Z"),
+    });
+  });
+
+  test("T4c3-a: apostrofo fora de valor citado nao abre aspa (<a title=it's>, title='a<b>c')", () => {
+    const placar = { tipo: "ok", votosSim: 721508, votosNao: 1142443 };
+    const figure = '<figure class="grafico-consulta-publica">';
+    const apostrofo = troca(fx("p160575"), figure, `<a title=it's>${figure}`);
+    expect(lerConsulta(apostrofo, 160575)).toMatchObject(placar);
+    const simples = troca(fx("p160575"), 'id="materiaId"', `id="materiaId" title='a<b>c'`);
+    expect(lerConsulta(simples, 160575)).toMatchObject(placar);
+    expect(lerConsulta("<a title=it's>" + fx("p1181"), 1181)).toEqual({
+      tipo: "sem_dado",
+      motivo: "encerrada",
+    });
+  });
+
+  test("T4c4-a: '<' solto em texto nao abre tag nem aspa (a < b = \"q, 5 < 6 isn't = 'x)", () => {
+    const figure = '<figure class="grafico-consulta-publica">';
+    const encerrada = troca(
+      fx("p160575"),
+      figure,
+      `<p>a < b = "q</p><div class="tramitacao-encerrada"></div>${figure}`,
+    );
+    expect(lerConsulta(encerrada, 160575)).toEqual({ tipo: "sem_dado", motivo: "encerrada" });
+    const apostrofo = troca(fx("p160575"), figure, `<p>5 < 6 isn't = 'x</p>${figure}`);
+    expect(lerConsulta(apostrofo, 160575)).toMatchObject({
+      tipo: "ok",
+      votosSim: 721508,
+      votosNao: 1142443,
+    });
+  });
+
+  test("T4c3-b: '>' dentro de atributo citado numa tag dentro da msg nao deixa lixo no texto", () => {
+    const html = troca(
+      fx("p160575"),
+      "Votos apurados até",
+      '<b title="x>y" data-z=\'a>b\'></b> Votos apurados até',
+    );
+    expect(lerConsulta(html, 160575)).toMatchObject({
+      tipo: "ok",
+      apuradoEm: new Date("2026-10-28T13:18:46.000Z"),
+    });
+  });
+
+  test("T4c3-c: title=\"<!--\" dentro de tag nao abre comentario; <!-- sem --> vai ate o fim", () => {
+    const html = troca(fx("p160575"), 'id="materiaId"', 'id="materiaId" title="<!--"');
+    expect(lerConsulta(html, 160575)).toMatchObject({
+      tipo: "ok",
+      votosSim: 721508,
+      votosNao: 1142443,
+    });
+    const aberto = troca(fx("p160575"), "<footer>", "<footer><!-- sem fim");
+    // O resto do HTML e comentario: nada do que vem depois (inclusive o fechamento da msg) e lido.
+    expect(lerConsulta(aberto, 160575)).toEqual({ tipo: "sem_dado", motivo: "sem_apuracao" });
+  });
+
+  test("T4c1-c: div aninhado dentro de msg-contabilizacao-voto nao corta a data", () => {
+    const html = troca(
+      fx("p160575"),
+      "Votos apurados até",
+      "<div><b></b></div> Votos apurados até",
+    );
+    expect(lerConsulta(html, 160575)).toMatchObject({
+      tipo: "ok",
+      apuradoEm: new Date("2026-10-28T13:18:46.000Z"),
+    });
+  });
+
+  test("T4c1-d: urlConsulta lanca RangeError para codigo invalido", () => {
+    for (const cod of [Number.NaN, 1.5, 0, -1, 1e21]) {
+      expect(() => urlConsulta(cod)).toThrow(RangeError);
+    }
+    expect(urlConsulta(7)).toBe("https://www12.senado.leg.br/ecidadania/visualizacaomateria?id=7");
+  });
+
   test("C16: 172395 sem milhar e ok 439 x 371", () => {
     const r = lerConsulta(fx("p172395"), 172395);
     expect(r).toMatchObject({ tipo: "ok", votosSim: 439, votosNao: 371 });
