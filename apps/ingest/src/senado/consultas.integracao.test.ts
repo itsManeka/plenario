@@ -370,6 +370,102 @@ describe("gravacao: rollback e contagem (T2)", () => {
   });
 });
 
+async function semearEventoRef(parlamentarId: string, tipo: string, refId: string): Promise<void> {
+  await sql`insert into evento (parlamentar_id, tipo, ocorrido_em, ref_id)
+    values (${parlamentarId}, ${tipo}::evento_tipo, '2023-05-10T15:00:00Z', ${refId})`;
+}
+
+const refs = async (): Promise<string[]> =>
+  (await sql<{ ref_id: string }[]>`select tipo || '|' || ref_id as ref_id from evento`).map((r) => r.ref_id).sort();
+
+describe("limpeza dos eventos mensais (T3)", () => {
+  test("C101 eventos mensais antigos da proposicao viram 1 evento canonico apos a rodada", async () => {
+    await semear(["160575"], "senado:9001", APRESENTACAO);
+    await semearEventoRef("senado:9001", "consulta_publica", "senado:160575:2026-09");
+    await semearEventoRef("senado:9001", "consulta_publica", "senado:160575:2026-10");
+    simularFetch({ "160575": ok("160575") });
+    await sincronizarConsultas();
+    expect((await eventos()).map((e) => e.ref_id)).toEqual(["senado:160575:2023-05"]);
+  });
+
+  test("C102 segunda rodada sem alteracao nao muda o conjunto de eventos", async () => {
+    await semear(["160575"], "senado:9001", APRESENTACAO);
+    await semearEventoRef("senado:9001", "consulta_publica", "senado:160575:2026-09");
+    simularFetch({ "160575": ok("160575") });
+    await sincronizarConsultas();
+    const antes = await sql`select id, ref_id from evento order by id`;
+    await sincronizarConsultas();
+    const depois = await sql`select id, ref_id from evento order by id`;
+    expect(antes).toHaveLength(1);
+    expect(depois.map((r) => [r.id, r.ref_id])).toEqual(antes.map((r) => [r.id, r.ref_id]));
+  });
+
+  test("C103 evento de proposicao com prefixo parecido ou de outra proposicao fica intacto", async () => {
+    await semear(["12", "123"], "senado:9001", APRESENTACAO);
+    await semearEventoRef("senado:9001", "consulta_publica", "senado:123:2026-09");
+    await semearEventoRef("senado:9001", "consulta_publica", "senado:999:2026-09");
+    // a 123 nao e lida (404): so a 12 grava e limpa
+    simularFetch({ "12": ok("12"), "123": () => new Response("fora", { status: 404 }) });
+    await sincronizarConsultas();
+    expect(await refs()).toEqual([
+      "consulta_publica|senado:123:2026-09",
+      "consulta_publica|senado:12:2023-05",
+      "consulta_publica|senado:999:2026-09",
+    ]);
+  });
+
+  test("C104 eventos de outros tipos da mesma proposicao e parlamentar ficam intactos", async () => {
+    await semear(["160575"], "senado:9001", APRESENTACAO);
+    await semearEventoRef("senado:9001", "voto", "senado:160575:2026-09");
+    await semearEventoRef("senado:9001", "proposicao", "senado:160575:2026-09");
+    await semearEventoRef("senado:9001", "despesa_mensal", "senado:160575:2026-09");
+    await semearEventoRef("senado:9001", "consulta_publica", "senado:160575:2026-09");
+    simularFetch({ "160575": ok("160575") });
+    await sincronizarConsultas();
+    expect(await refs()).toEqual([
+      "consulta_publica|senado:160575:2023-05",
+      "despesa_mensal|senado:160575:2026-09",
+      "proposicao|senado:160575:2026-09",
+      "voto|senado:160575:2026-09",
+    ]);
+  });
+
+  test("C105 evento antigo de outro parlamentar da mesma proposicao e apagado", async () => {
+    await semear(["160575"], "senado:9001", APRESENTACAO);
+    await sql`insert into parlamentar (id, casa, id_externo, nome, busca)
+      values ('senado:9002', 'senado', '9002', 'Outro Parlamentar', 'outro parlamentar')`;
+    await semearEventoRef("senado:9002", "consulta_publica", "senado:160575:2026-09");
+    simularFetch({ "160575": ok("160575") });
+    await sincronizarConsultas();
+    const ev = await sql`select parlamentar_id, ref_id from evento where tipo = 'consulta_publica'`;
+    expect(ev.map((r) => [r.parlamentar_id, r.ref_id])).toEqual([["senado:9001", "senado:160575:2023-05"]]);
+  });
+
+  test("C106 ref_id de outra proposicao nao e apagado por curinga de LIKE (% e _ literais)", async () => {
+    await sql`insert into parlamentar (id, casa, id_externo, nome, busca)
+      values ('senado:9001', 'senado', '9001', 'Parlamentar Teste', 'parlamentar teste')`;
+    // ids com curinga: o padrao LIKE 'senado:16_575:%' casaria 'senado:160575:...'
+    for (const [id, ext] of [
+      ["senado:16_575", "160575"],
+      ["senado:17%", "172395"],
+    ] as const) {
+      await sql`insert into proposicao (id, casa, id_externo, sigla_tipo, numero, ano, data_apresentacao)
+        values (${id}, 'senado', ${ext}, 'PL', 1, 2026, ${APRESENTACAO})`;
+      await sql`insert into proposicao_autor (proposicao_id, parlamentar_id, ordem) values (${id}, 'senado:9001', 1)`;
+    }
+    await semearEventoRef("senado:9001", "consulta_publica", "senado:160575:2026-09");
+    await semearEventoRef("senado:9001", "consulta_publica", "senado:172395:2026-09");
+    simularFetch({ "160575": ok("160575"), "172395": ok("172395") });
+    await sincronizarConsultas();
+    expect((await eventos()).map((e) => e.ref_id).sort()).toEqual([
+      "senado:160575:2026-09",
+      "senado:16_575:2023-05",
+      "senado:17%:2023-05",
+      "senado:172395:2026-09",
+    ]);
+  });
+});
+
 describe("puladasDoCursor via cursor semeado", () => {
   const valida = (): { em: string; motivo: string } => ({ em: agoraIso(), motivo: "encerrada" });
 

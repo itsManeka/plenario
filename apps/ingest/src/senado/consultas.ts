@@ -4,7 +4,7 @@
  * contadores para quem chama (index.ts) gravar tudo numa unica `gravarCursor`.
  */
 import { db, schema } from "@plenario/core/db";
-import { eq, inArray, sql as dsql } from "drizzle-orm";
+import { and, eq, inArray, ne, sql as dsql } from "drizzle-orm";
 import { buscarTexto } from "../http";
 import { criarThrottleConsultas } from "../throttle";
 import { lerConsulta, urlConsulta } from "./consulta_parser";
@@ -243,6 +243,15 @@ export async function sincronizarConsultas(parcial?: { atual?: ResultadoConsulta
                   set: { resumo: dsql`excluded.resumo` },
                 })
                 .returning({ id: schema.evento.id });
+              // limpeza idempotente dos eventos de formato antigo (um por mes): por proposicao, sem filtrar
+              // parlamentar; comparacao exata do prefixo "<proposicao>:" (starts_with, sem curinga de LIKE)
+              await tx.delete(schema.evento).where(
+                and(
+                  eq(schema.evento.tipo, "consulta_publica"),
+                  dsql`starts_with(${schema.evento.refId}, ${`${c.proposicaoId}:`})`,
+                  ne(schema.evento.refId, evento.refId),
+                ),
+              );
               return { gravou: true, evento: gravados.length };
             }).catch((e: unknown): never => {
               throw new ErroGravacao(e);
