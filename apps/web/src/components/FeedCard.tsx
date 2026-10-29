@@ -259,6 +259,8 @@ export function FeedCard({ item }: { item: FeedItem }) {
 const AVISO_CONSULTA =
   "Enquete aberta no e-Cidadania: cada pessoa cadastrada vota uma vez. Não representa a população.";
 
+const CTA_CONSULTA = "Opine no e-Cidadania";
+
 /** Classe do `<article>` dos cards "prédio" (consulta pública e votação agrupada). */
 const CLASSE_CARD_PREDIO =
   "relative flex gap-3 border-b border-line px-4 py-3.5 transition-colors has-[.stretched:hover]:bg-sunken/60 has-[.stretched:focus-visible]:bg-sunken/60";
@@ -311,7 +313,10 @@ function CardConsulta({ item }: { item: FeedItemConsulta }) {
         </p>
         <p className="mt-1 text-xs leading-4 text-muted">{AVISO_CONSULTA}</p>
         <div className="above-stretch mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm">
-          <FonteLink href={item.urlFonte} />
+          <FonteLink href={item.urlFonte}>
+            {CTA_CONSULTA}
+            <span className="sr-only">, site do Senado</span>
+          </FonteLink>
         </div>
       </div>
     </article>
