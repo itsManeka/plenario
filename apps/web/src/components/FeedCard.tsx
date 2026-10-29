@@ -315,7 +315,7 @@ function CardConsulta({ item }: { item: FeedItemConsulta }) {
         <div className="above-stretch mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm">
           <FonteLink href={item.urlFonte}>
             {CTA_CONSULTA}
-            <span className="sr-only">, site do Senado</span>
+            <span className="sr-only"> — site do Senado</span>
           </FonteLink>
         </div>
       </div>

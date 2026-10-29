@@ -136,7 +136,8 @@ coletivo dizer o contrário na issue.
    6). O card de consulta fica separado do card da proposição, mesmo caindo no mesmo dia, e a página
    interna da proposição não mostra o placar: o card leva para ela e o link oficial para o
    e-Cidadania. O link oficial desse card tem o texto "Opine no e-Cidadania" (nome acessível
-   ", site do Senado (abre em nova aba)"): verbo do próprio site, sem sugerir lado. Os demais cards seguem com "Fonte oficial".
+   "Opine no e-Cidadania — site do Senado (abre em nova aba)"): verbo do próprio site, sem
+   sugerir lado. Os demais cards seguem com "Fonte oficial".
 4. **Aviso fixo (texto exato):**
    > Enquete aberta no e-Cidadania: cada pessoa cadastrada vota uma vez. Não representa a população.
 5. **Elegibilidade:** proposições do Senado já ingeridas (`proposicao`, `casa = 'senado'`). A tabela
