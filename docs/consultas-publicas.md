@@ -215,13 +215,20 @@ coletivo dizer o contrário na issue.
 >
 > **Efeito.** `core`: tabela nova `consulta_publica` e valor `consulta_publica` em `evento_tipo`
 > (aditivo). `ingest`: leitor de HTML lento com parser estrito e os primeiros testes do pacote.
-> `api`: novo tipo no feed. `web`: card de consulta e chip de filtro. O evento fica no primeiro
-> signatário, um por proposição, datado pela apresentação da matéria e com o placar da última leitura.
+> `api`: novo tipo no feed e o bloco opcional `consulta` em `ProposicaoDetalhe` (aditivo, `core`).
+> `web`: card de consulta, chip de filtro e seção "Consulta pública" na página da proposição, todos
+> com o link "Opine no e-Cidadania" para a página oficial. O evento fica no primeiro signatário, um
+> por proposição, datado pela apresentação da matéria e com o placar da última leitura.
+>
+> **Proposta à parte (CI).** O PR traz `.github/workflows/testes.yml`: Postgres 16 de serviço,
+> `db:push`, typecheck e `bun test` por workspace em PR e push na `main`. Se o coletivo preferir,
+> sai do PR e vira issue própria.
 >
 > **Perguntas ao coletivo.**
 > 1. Placar do e-Cidadania cabe em "só dado oficial"?
 > 2. Card ligado ao primeiro signatário serve, ou preferem item sem parlamentar (muda `evento`)?
 > 3. O texto do aviso está bom?
+> 4. O link "Opine no e-Cidadania" é aceitável, ou soa como chamada à ação fora do escopo do feed?
 
 ## Rascunho do pedido ao Senado
 
