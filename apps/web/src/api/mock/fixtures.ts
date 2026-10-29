@@ -378,6 +378,9 @@ const consultas: { prop: ProposicaoDetalhe; dias: number; sim: number; nao: numb
 ];
 for (const c of consultas) {
   const apuradoEm = instanteConsulta(c.dias);
+  const urlFonte = `https://example.org/senado/consulta/${c.prop.id.split(":")[1]}`;
+  // placar também na página da proposição (senadoEm(3) e as demais sem consulta ficam com null)
+  c.prop.consulta = { votosSim: c.sim, votosNao: c.nao, apuradoEm, urlFonte };
   feed.push({
     id: String(seq++),
     tipo: "consulta_publica",
@@ -387,7 +390,7 @@ for (const c of consultas) {
     votosSim: c.sim,
     votosNao: c.nao,
     apuradoEm,
-    urlFonte: `https://example.org/senado/consulta/${c.prop.id.split(":")[1]}`,
+    urlFonte,
   });
 }
 

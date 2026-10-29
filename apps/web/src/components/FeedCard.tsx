@@ -14,7 +14,6 @@ import {
   brl,
   CASA_NOME,
   categoriaDespesa,
-  dataHora,
   mesAno,
   mesCorrente,
   NOTA_PASSAGEM,
@@ -24,6 +23,7 @@ import {
   partidoUf,
 } from "../lib/format";
 import { IconeDiferente, IconeIgual, IconePredio } from "./Icones";
+import { PlacarConsulta } from "./PlacarConsulta";
 import { Avatar, Etiqueta, FonteLink, Tempo, VotoSelo } from "./ui";
 
 export function hrefParlamentar(id: string) {
@@ -256,11 +256,6 @@ export function FeedCard({ item }: { item: FeedItem }) {
   }
 }
 
-const AVISO_CONSULTA =
-  "Enquete aberta no e-Cidadania: cada pessoa cadastrada vota uma vez. Não representa a população.";
-
-const CTA_CONSULTA = "Opine no e-Cidadania";
-
 /** Classe do `<article>` dos cards "prédio" (consulta pública e votação agrupada). */
 const CLASSE_CARD_PREDIO =
   "relative flex gap-3 border-b border-line px-4 py-3.5 transition-colors has-[.stretched:hover]:bg-sunken/60 has-[.stretched:focus-visible]:bg-sunken/60";
@@ -298,26 +293,13 @@ function CardConsulta({ item }: { item: FeedItemConsulta }) {
           ({partidoUf(p)})
         </p>
         {pr.ementa && <p className="mt-1 line-clamp-3 text-sm leading-5 text-ink-2">{pr.ementa}</p>}
-        <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm">
-          <li className="inline-flex items-center gap-1.5 tabular-nums">
-            <VotoSelo voto="sim" compacto />
-            <span className="font-semibold">{num(item.votosSim)}</span>
-          </li>
-          <li className="inline-flex items-center gap-1.5 tabular-nums">
-            <VotoSelo voto="nao" compacto />
-            <span className="font-semibold">{num(item.votosNao)}</span>
-          </li>
-        </ul>
-        <p className="mt-1.5 text-sm text-muted">
-          Votos apurados até <span className="tabular-nums">{dataHora(item.apuradoEm)}</span>
-        </p>
-        <p className="mt-1 text-xs leading-4 text-muted">{AVISO_CONSULTA}</p>
-        <div className="above-stretch mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm">
-          <FonteLink href={item.urlFonte}>
-            {CTA_CONSULTA}
-            <span className="sr-only"> — site do Senado</span>
-          </FonteLink>
-        </div>
+        <PlacarConsulta
+          votosSim={item.votosSim}
+          votosNao={item.votosNao}
+          apuradoEm={item.apuradoEm}
+          urlFonte={item.urlFonte}
+          linkClassName="above-stretch"
+        />
       </div>
     </article>
   );
