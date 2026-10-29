@@ -473,6 +473,18 @@ describe("limpeza dos eventos mensais (T3)", () => {
       "senado:172395:2026-09",
     ]);
   });
+
+  test("C117 canonico de quem deixou de ser o primeiro signatario (mesmo ref_id) e removido pelo sync", async () => {
+    await semear(["160575"], "senado:9001", APRESENTACAO);
+    await sql`insert into parlamentar (id, casa, id_externo, nome, busca)
+      values ('senado:9002', 'senado', '9002', 'Outro Parlamentar', 'outro parlamentar')`;
+    // sem linha em consulta_publica a normalizacao nao age: a limpeza e a do proprio sync
+    await semearEventoRef("senado:9002", "consulta_publica", "senado:160575:2023-05");
+    simularFetch({ "160575": ok("160575") });
+    await sincronizarConsultas();
+    const ev = await sql`select parlamentar_id, ref_id from evento where tipo = 'consulta_publica'`;
+    expect(ev.map((r) => [r.parlamentar_id, r.ref_id])).toEqual([["senado:9001", "senado:160575:2023-05"]]);
+  });
 });
 
 // ---------- normalizacao dos eventos antigos (T3b) ----------
@@ -669,6 +681,34 @@ describe("normalizacao dos eventos antigos (T3b)", () => {
     expect(await normalizarEventosConsulta()).toBe(0);
     expect(await detalhes()).toEqual(antes);
     expect(antes).toHaveLength(1);
+  });
+
+  test("C118 proposicao com 2 linhas em consulta_publica usa a de maior apurado_em e a 2a chamada nao escreve", async () => {
+    await semear(["160575"], "senado:9001", APRESENTACAO);
+    // materia_cod e a PK: a mesma proposicao pode ter mais de uma linha; a mais recente e a de cod 160576
+    await semearConsultaTabela("160575", 11, 22, "2026-09-01T10:00:00.000Z");
+    await sql`insert into consulta_publica (materia_cod, proposicao_id, votos_sim, votos_nao, apurado_em, url_fonte)
+      values ('160576', 'senado:160575', 777, 333, ${APURADO_NOVO}, 'https://exemplo.test/consulta')`;
+    expect(await normalizarEventosConsulta()).toBe(1);
+    const antes = await detalhes();
+    expect(antes).toHaveLength(1);
+    expect(antes[0]).toMatchObject({ ref_id: "senado:160575:2023-05", sim: "777", nao: "333", apurado: APURADO_NOVO });
+    await bloquearAtualizacaoEventos();
+    expect(await normalizarEventosConsulta()).toBe(0);
+    expect(await detalhes()).toEqual(antes);
+  });
+
+  test("C119 2 linhas de consulta_publica nao duplicam o autor unico sem ordem: o evento e criado", async () => {
+    await semear(["160575"], "senado:9001", APRESENTACAO);
+    // autor unico com ordem null: so conta como primeiro signatario se aparecer 1x
+    await sql`update proposicao_autor set ordem = null where proposicao_id = 'senado:160575'`;
+    await semearConsultaTabela("160575", 11, 22, "2026-09-01T10:00:00.000Z");
+    await sql`insert into consulta_publica (materia_cod, proposicao_id, votos_sim, votos_nao, apurado_em, url_fonte)
+      values ('160576', 'senado:160575', 777, 333, ${APURADO_NOVO}, 'https://exemplo.test/consulta')`;
+    expect(await normalizarEventosConsulta()).toBe(1);
+    expect((await detalhes()).map((e) => [e.parlamentar_id, e.ref_id])).toEqual([
+      ["senado:9001", "senado:160575:2023-05"],
+    ]);
   });
 });
 

@@ -126,7 +126,7 @@ export async function run(opcoes: OpcoesIngest, fontes: Fontes = FONTES): Promis
     const rc = await fontes.sincronizarConsultas(parcial);
     await gravarConsultas(rc);
     log(
-      `consultas: ${rc.lidas} lidas, ${rc.puladas} puladas, ${rc.eventos} eventos` +
+      `consultas: ${rc.lidas} lidas, ${rc.puladas} puladas, ${rc.eventos} eventos gravados (criados ou atualizados)` +
         (rc.falhas ? `, ${rc.falhas} falhas` : "") +
         (rc.abortou ? " (rodada abortada: falhas seguidas)" : ""),
     );

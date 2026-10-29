@@ -4,7 +4,7 @@
  * contadores para quem chama (index.ts) gravar tudo numa unica `gravarCursor`.
  */
 import { db, schema } from "@plenario/core/db";
-import { and, eq, inArray, ne, sql as dsql } from "drizzle-orm";
+import { and, eq, inArray, ne, or, sql as dsql } from "drizzle-orm";
 import { buscarTexto } from "../http";
 import { criarThrottleConsultas } from "../throttle";
 import { lerConsulta, urlConsulta } from "./consulta_parser";
@@ -106,8 +106,9 @@ class ErroGravacao extends Error {
  * Devolve quantas proposicoes foram normalizadas.
  */
 export async function normalizarEventosConsulta(): Promise<number> {
-  const consultas = await db
+  const linhasConsulta = await db
     .select({
+      materiaCod: schema.consultaPublica.materiaCod,
       proposicaoId: schema.consultaPublica.proposicaoId,
       votosSim: schema.consultaPublica.votosSim,
       votosNao: schema.consultaPublica.votosNao,
@@ -116,8 +117,22 @@ export async function normalizarEventosConsulta(): Promise<number> {
     })
     .from(schema.consultaPublica)
     .innerJoin(schema.proposicao, eq(schema.proposicao.id, schema.consultaPublica.proposicaoId));
-  if (consultas.length === 0) return 0;
+  if (linhasConsulta.length === 0) return 0;
 
+  // consulta_publica tem PK materia_cod: a proposicao pode ter mais de uma linha; vale a de maior
+  // apurado_em (empate: maior materia_cod, deterministico)
+  const maisRecente = new Map<string, (typeof linhasConsulta)[number]>();
+  for (const l of linhasConsulta) {
+    const atual = maisRecente.get(l.proposicaoId);
+    const vence =
+      atual === undefined ||
+      l.apuradoEm.getTime() > atual.apuradoEm.getTime() ||
+      (l.apuradoEm.getTime() === atual.apuradoEm.getTime() && l.materiaCod > atual.materiaCod);
+    if (vence) maisRecente.set(l.proposicaoId, l);
+  }
+  const consultas = [...maisRecente.values()];
+
+  // subconsulta (nao join): varias linhas de consulta_publica nao duplicam os autores
   const autores = await db
     .select({
       proposicaoId: schema.proposicaoAutor.proposicaoId,
@@ -125,7 +140,12 @@ export async function normalizarEventosConsulta(): Promise<number> {
       ordem: schema.proposicaoAutor.ordem,
     })
     .from(schema.proposicaoAutor)
-    .innerJoin(schema.consultaPublica, eq(schema.consultaPublica.proposicaoId, schema.proposicaoAutor.proposicaoId));
+    .where(
+      inArray(
+        schema.proposicaoAutor.proposicaoId,
+        db.select({ id: schema.consultaPublica.proposicaoId }).from(schema.consultaPublica),
+      ),
+    );
   const autoresPorProposicao = new Map<string, AutorOrdem[]>();
   for (const a of autores) {
     const lista = autoresPorProposicao.get(a.proposicaoId) ?? [];
@@ -359,13 +379,14 @@ export async function sincronizarConsultas(parcial?: { atual?: ResultadoConsulta
                   set: { resumo: dsql`excluded.resumo` },
                 })
                 .returning({ id: schema.evento.id });
-              // limpeza idempotente dos eventos de formato antigo (um por mes): por proposicao, sem filtrar
-              // parlamentar; comparacao exata do prefixo "<proposicao>:" (starts_with, sem curinga de LIKE)
+              // evento unico por proposicao: apaga tudo da proposicao que nao seja o canonico (outro ref_id, de
+              // formato antigo, ou o mesmo ref_id de outro parlamentar); prefixo exato "<proposicao>:"
+              // (starts_with, sem curinga de LIKE)
               await tx.delete(schema.evento).where(
                 and(
                   eq(schema.evento.tipo, "consulta_publica"),
                   dsql`starts_with(${schema.evento.refId}, ${`${c.proposicaoId}:`})`,
-                  ne(schema.evento.refId, evento.refId),
+                  or(ne(schema.evento.refId, evento.refId), ne(schema.evento.parlamentarId, evento.parlamentarId)),
                 ),
               );
               return { gravou: true, evento: gravados.length };
