@@ -99,10 +99,126 @@ class ErroGravacao extends Error {
 }
 
 /**
+ * Leva o evento `consulta_publica` de cada proposicao ao formato canonico (1 por proposicao, `ocorrido_em` =
+ * apresentacao) so com dado do banco, sem rede. Numa unica transacao, por proposicao divergente: upsert do
+ * canonico e depois delete dos demais (prefixo exato "<proposicao>:"). Sem divergencia nao escreve nada.
+ * Proposicao sem primeiro signatario e ignorada. Lanca se a transacao falhar (nada e alterado); quem chama decide.
+ * Devolve quantas proposicoes foram normalizadas.
+ */
+export async function normalizarEventosConsulta(): Promise<number> {
+  const consultas = await db
+    .select({
+      proposicaoId: schema.consultaPublica.proposicaoId,
+      votosSim: schema.consultaPublica.votosSim,
+      votosNao: schema.consultaPublica.votosNao,
+      apuradoEm: schema.consultaPublica.apuradoEm,
+      dataApresentacao: schema.proposicao.dataApresentacao,
+    })
+    .from(schema.consultaPublica)
+    .innerJoin(schema.proposicao, eq(schema.proposicao.id, schema.consultaPublica.proposicaoId));
+  if (consultas.length === 0) return 0;
+
+  const autores = await db
+    .select({
+      proposicaoId: schema.proposicaoAutor.proposicaoId,
+      parlamentarId: schema.proposicaoAutor.parlamentarId,
+      ordem: schema.proposicaoAutor.ordem,
+    })
+    .from(schema.proposicaoAutor)
+    .innerJoin(schema.consultaPublica, eq(schema.consultaPublica.proposicaoId, schema.proposicaoAutor.proposicaoId));
+  const autoresPorProposicao = new Map<string, AutorOrdem[]>();
+  for (const a of autores) {
+    const lista = autoresPorProposicao.get(a.proposicaoId) ?? [];
+    lista.push({ parlamentarId: a.parlamentarId, ordem: a.ordem });
+    autoresPorProposicao.set(a.proposicaoId, lista);
+  }
+
+  const existentes = await db
+    .select({
+      parlamentarId: schema.evento.parlamentarId,
+      refId: schema.evento.refId,
+      ocorridoEm: schema.evento.ocorridoEm,
+      resumo: schema.evento.resumo,
+    })
+    .from(schema.evento)
+    .where(eq(schema.evento.tipo, "consulta_publica"));
+  // chave = ref_id sem o ultimo segmento ":AAAA-MM" (comparacao exata, "senado:12" != "senado:123")
+  const eventosPorProposicao = new Map<string, typeof existentes>();
+  for (const e of existentes) {
+    const chave = e.refId.slice(0, Math.max(0, e.refId.lastIndexOf(":")));
+    const lista = eventosPorProposicao.get(chave) ?? [];
+    lista.push(e);
+    eventosPorProposicao.set(chave, lista);
+  }
+
+  const divergentes: NonNullable<ReturnType<typeof montarEvento>>[] = [];
+  for (const c of consultas) {
+    const canonico = montarEvento({
+      proposicaoId: c.proposicaoId,
+      autores: autoresPorProposicao.get(c.proposicaoId) ?? [],
+      leitura: { cod: 0, votosSim: c.votosSim, votosNao: c.votosNao, apuradoEm: c.apuradoEm, urlFonte: "" },
+      dataApresentacao: c.dataApresentacao,
+    });
+    if (canonico === null) continue;
+    const atuais = eventosPorProposicao.get(c.proposicaoId) ?? [];
+    const [unico] = atuais;
+    const resumo = unico?.resumo as { votosSim?: unknown; votosNao?: unknown; apuradoEm?: unknown } | null | undefined;
+    const igual =
+      atuais.length === 1 &&
+      unico !== undefined &&
+      unico.parlamentarId === canonico.parlamentarId &&
+      unico.refId === canonico.refId &&
+      unico.ocorridoEm.getTime() === canonico.ocorridoEm.getTime() &&
+      resumo?.votosSim === canonico.resumo.votosSim &&
+      resumo?.votosNao === canonico.resumo.votosNao &&
+      resumo?.apuradoEm === canonico.resumo.apuradoEm;
+    if (!igual) divergentes.push(canonico);
+  }
+  if (divergentes.length === 0) return 0;
+
+  await db.transaction(async (tx) => {
+    for (const canonico of divergentes) {
+      await tx
+        .insert(schema.evento)
+        .values(canonico)
+        .onConflictDoUpdate({
+          target: [schema.evento.parlamentarId, schema.evento.tipo, schema.evento.refId],
+          set: { ocorridoEm: dsql`excluded.ocorrido_em`, resumo: dsql`excluded.resumo` },
+        });
+      const prefixo = canonico.refId.slice(0, canonico.refId.lastIndexOf(":") + 1);
+      await tx.delete(schema.evento).where(
+        and(
+          eq(schema.evento.tipo, "consulta_publica"),
+          dsql`starts_with(${schema.evento.refId}, ${prefixo})`,
+          ne(schema.evento.refId, canonico.refId),
+        ),
+      );
+      // o canonico pode ter o mesmo ref_id em outro parlamentar (primeiro signatario mudou): sobra apagada
+      await tx
+        .delete(schema.evento)
+        .where(
+          and(
+            eq(schema.evento.tipo, "consulta_publica"),
+            eq(schema.evento.refId, canonico.refId),
+            ne(schema.evento.parlamentarId, canonico.parlamentarId),
+          ),
+        );
+    }
+  });
+  return divergentes.length;
+}
+
+/**
  * `parcial` (opcional) e preenchido durante a rodada: se o sync lancar, quem chama ainda tem os pulos
  * e contadores ja registrados para gravar no cursor.
  */
 export async function sincronizarConsultas(parcial?: { atual?: ResultadoConsultas }): Promise<ResultadoConsultas> {
+  try {
+    await normalizarEventosConsulta();
+  } catch (e) {
+    // normalizacao falhou e desfez tudo: a rodada segue (a releitura normaliza aos poucos)
+    log(`consultas: normalizacao dos eventos falhou (${descreverErro(e)})`);
+  }
   const agora = new Date();
   const teto = lerTetoConsultas(process.env);
   const estado = await lerCursor(FONTE_CURSOR_CONSULTAS);

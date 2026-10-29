@@ -15,6 +15,7 @@ const CONSOLE_LOG_ORIGINAL = console.log;
 
 let sql: Sql;
 let sincronizarConsultas: typeof import("./consultas").sincronizarConsultas;
+let normalizarEventosConsulta: typeof import("./consultas").normalizarEventosConsulta;
 let base: string;
 let statusRedirecao: number;
 let logs: string[];
@@ -91,6 +92,14 @@ async function liberarEventos(): Promise<void> {
   await sql`drop function if exists falha_evento_teste()`;
   await sql`drop trigger if exists falha_evento_update_teste on evento`;
   await sql`drop function if exists falha_evento_update_teste()`;
+  await sql`drop trigger if exists falha_evento_delete_teste on evento`;
+  await sql`drop function if exists falha_evento_delete_teste()`;
+}
+
+async function bloquearRemocaoEventos(): Promise<void> {
+  await sql`create or replace function falha_evento_delete_teste() returns trigger language plpgsql as $$
+    begin raise exception 'delete de evento bloqueado pelo teste'; end $$`;
+  await sql`create trigger falha_evento_delete_teste before delete on evento for each row execute function falha_evento_delete_teste()`;
 }
 
 interface LinhaEvento {
@@ -138,7 +147,7 @@ const agoraIso = (): string => new Date().toISOString();
 
 beforeAll(async () => {
   sql = await prepararBancoDeTeste();
-  ({ sincronizarConsultas } = await import("./consultas"));
+  ({ sincronizarConsultas, normalizarEventosConsulta } = await import("./consultas"));
   base = await fixture("p160575.html");
   const hdr = await fixture("p999999999.hdr");
   statusRedirecao = Number(/^HTTP\/1\.1 (\d{3})/.exec(hdr)?.[1]);
@@ -463,6 +472,203 @@ describe("limpeza dos eventos mensais (T3)", () => {
       "senado:17%:2023-05",
       "senado:172395:2026-09",
     ]);
+  });
+});
+
+// ---------- normalizacao dos eventos antigos (T3b) ----------
+
+const APURADO_NOVO = "2026-10-28T13:18:46.000Z";
+
+async function semearConsultaTabela(cod: string, sim: number, nao: number, apuradoEm: string): Promise<void> {
+  await sql`insert into consulta_publica (materia_cod, proposicao_id, votos_sim, votos_nao, apurado_em, url_fonte)
+    values (${cod}, ${`senado:${cod}`}, ${sim}, ${nao}, ${apuradoEm}, 'https://exemplo.test/consulta')`;
+}
+
+async function semearEventoComResumo(
+  parlamentarId: string,
+  refId: string,
+  ocorridoEm: string,
+  sim: number,
+  nao: number,
+): Promise<void> {
+  const resumo = JSON.stringify({ votosSim: sim, votosNao: nao, apuradoEm: ocorridoEm });
+  await sql`insert into evento (parlamentar_id, tipo, ocorrido_em, ref_id, resumo)
+    values (${parlamentarId}, 'consulta_publica'::evento_tipo, ${ocorridoEm}, ${refId}, ${resumo}::jsonb)`;
+}
+
+interface Detalhe {
+  id: number;
+  parlamentar_id: string;
+  ref_id: string;
+  ocorrido: string;
+  sim: string;
+  nao: string;
+  apurado: string;
+}
+
+async function detalhes(): Promise<Detalhe[]> {
+  const rs = await sql<
+    (Omit<Detalhe, "ocorrido"> & { ocorrido: Date | string })[]
+  >`select id, parlamentar_id, ref_id, ocorrido_em as ocorrido, resumo->>'votosSim' as sim,
+      resumo->>'votosNao' as nao, resumo->>'apuradoEm' as apurado
+    from evento where tipo = 'consulta_publica' order by ref_id, parlamentar_id`;
+  return rs.map((r) => ({ ...r, ocorrido: new Date(r.ocorrido).toISOString() }));
+}
+
+describe("normalizacao dos eventos antigos (T3b)", () => {
+  test("C107 evento antigo vira o canonico: ocorrido_em da apresentacao, ref_id da apresentacao e placar da tabela", async () => {
+    await semear(["160575"], "senado:9001", APRESENTACAO);
+    await semearConsultaTabela("160575", 777, 333, APURADO_NOVO);
+    await semearEventoComResumo("senado:9001", "senado:160575:2026-10", "2026-10-20T12:00:00.000Z", 1, 2);
+    expect(await normalizarEventosConsulta()).toBe(1);
+    const ev = await detalhes();
+    expect(ev).toHaveLength(1);
+    expect(ev[0]).toMatchObject({
+      parlamentar_id: "senado:9001",
+      ref_id: "senado:160575:2023-05",
+      ocorrido: "2023-05-10T15:00:00.000Z",
+      sim: "777",
+      nao: "333",
+      apurado: APURADO_NOVO,
+    });
+  });
+
+  test("C108 segunda chamada sem alteracao nao muda nada", async () => {
+    await semear(["160575"], "senado:9001", APRESENTACAO);
+    await semearConsultaTabela("160575", 777, 333, APURADO_NOVO);
+    await semearEventoComResumo("senado:9001", "senado:160575:2026-10", "2026-10-20T12:00:00.000Z", 1, 2);
+    await normalizarEventosConsulta();
+    const antes = await detalhes();
+    expect(await normalizarEventosConsulta()).toBe(0);
+    const depois = await detalhes();
+    expect(antes).toHaveLength(1);
+    expect(depois).toEqual(antes);
+    expect(await contar("evento")).toBe(1);
+  });
+
+  test("C109 sem data_apresentacao usa apurado_em, com o mes do ref_id em BRT", async () => {
+    await semear(["160575"], "senado:9001", null);
+    // 01/11 01:00 UTC = 31/10 22:00 em Sao Paulo: o mes do ref_id e 2026-10
+    await semearConsultaTabela("160575", 40, 30, "2026-11-01T01:00:00.000Z");
+    await semearEventoComResumo("senado:9001", "senado:160575:2026-11", "2026-11-01T01:00:00.000Z", 1, 2);
+    await normalizarEventosConsulta();
+    const ev = await detalhes();
+    expect(ev).toHaveLength(1);
+    expect(ev[0]).toMatchObject({
+      ref_id: "senado:160575:2026-10",
+      ocorrido: "2026-11-01T01:00:00.000Z",
+      sim: "40",
+      nao: "30",
+    });
+  });
+
+  test("C110 outros tipos e consulta_publica de outra proposicao (prefixo parecido) ficam intactos", async () => {
+    await semear(["12", "123", "999"], "senado:9001", APRESENTACAO);
+    await semearConsultaTabela("12", 5, 6, APURADO_NOVO);
+    await semearEventoComResumo("senado:9001", "senado:12:2026-09", "2026-09-10T12:00:00.000Z", 1, 2);
+    await semearEventoRef("senado:9001", "voto", "senado:12:2026-09");
+    await semearEventoRef("senado:9001", "proposicao", "senado:12:2026-09");
+    await semearEventoRef("senado:9001", "despesa_mensal", "senado:12:2026-09");
+    await semearEventoRef("senado:9001", "consulta_publica", "senado:123:2026-09");
+    await semearEventoRef("senado:9001", "consulta_publica", "senado:999:2026-09");
+    await normalizarEventosConsulta();
+    expect(await refs()).toEqual([
+      "consulta_publica|senado:123:2026-09",
+      "consulta_publica|senado:12:2023-05",
+      "consulta_publica|senado:999:2026-09",
+      "despesa_mensal|senado:12:2026-09",
+      "proposicao|senado:12:2026-09",
+      "voto|senado:12:2026-09",
+    ]);
+  });
+
+  test("C111 so evento antigo existente deixa exatamente 1 evento da proposicao", async () => {
+    await semear(["160575"], "senado:9001", APRESENTACAO);
+    await semearConsultaTabela("160575", 10, 20, APURADO_NOVO);
+    await semearEventoComResumo("senado:9001", "senado:160575:2026-10", "2026-10-20T12:00:00.000Z", 1, 2);
+    await normalizarEventosConsulta();
+    expect(await contar("evento")).toBe(1);
+    expect((await eventos()).map((e) => e.ref_id)).toEqual(["senado:160575:2023-05"]);
+  });
+
+  test("C112 canonico existente com placar velho e antigo coexistem: sobra 1 evento com o placar atual", async () => {
+    await semear(["160575"], "senado:9001", APRESENTACAO);
+    await semearConsultaTabela("160575", 777, 333, APURADO_NOVO);
+    await semearEventoComResumo("senado:9001", "senado:160575:2023-05", APRESENTACAO, 11, 22);
+    await semearEventoComResumo("senado:9001", "senado:160575:2026-10", "2026-10-20T12:00:00.000Z", 1, 2);
+    await normalizarEventosConsulta();
+    const ev = await detalhes();
+    expect(ev).toHaveLength(1);
+    expect(ev[0]).toMatchObject({ ref_id: "senado:160575:2023-05", sim: "777", nao: "333", apurado: APURADO_NOVO });
+  });
+
+  test("C113 dois antigos (2026-09 e 2026-10) viram 1 evento canonico", async () => {
+    await semear(["160575"], "senado:9001", APRESENTACAO);
+    await semearConsultaTabela("160575", 777, 333, APURADO_NOVO);
+    await semearEventoComResumo("senado:9001", "senado:160575:2026-09", "2026-09-20T12:00:00.000Z", 1, 2);
+    await semearEventoComResumo("senado:9001", "senado:160575:2026-10", "2026-10-20T12:00:00.000Z", 3, 4);
+    await normalizarEventosConsulta();
+    expect((await detalhes()).map((e) => [e.ref_id, e.sim])).toEqual([["senado:160575:2023-05", "777"]]);
+  });
+
+  test("C114 antigo de quem nao e mais o primeiro signatario passa ao signatario atual, sem sobra", async () => {
+    await semear(["160575"], "senado:9001", APRESENTACAO);
+    await sql`insert into parlamentar (id, casa, id_externo, nome, busca)
+      values ('senado:9002', 'senado', '9002', 'Outro Parlamentar', 'outro parlamentar')`;
+    await semearConsultaTabela("160575", 777, 333, APURADO_NOVO);
+    await semearEventoComResumo("senado:9002", "senado:160575:2026-10", "2026-10-20T12:00:00.000Z", 1, 2);
+    await normalizarEventosConsulta();
+    expect((await detalhes()).map((e) => [e.parlamentar_id, e.ref_id])).toEqual([
+      ["senado:9001", "senado:160575:2023-05"],
+    ]);
+  });
+
+  test("C114b canonico do parlamentar antigo com o mesmo ref_id tambem e removido", async () => {
+    await semear(["160575"], "senado:9001", APRESENTACAO);
+    await sql`insert into parlamentar (id, casa, id_externo, nome, busca)
+      values ('senado:9002', 'senado', '9002', 'Outro Parlamentar', 'outro parlamentar')`;
+    await semearConsultaTabela("160575", 777, 333, APURADO_NOVO);
+    await semearEventoComResumo("senado:9002", "senado:160575:2023-05", APRESENTACAO, 1, 2);
+    await normalizarEventosConsulta();
+    expect((await detalhes()).map((e) => [e.parlamentar_id, e.ref_id])).toEqual([
+      ["senado:9001", "senado:160575:2023-05"],
+    ]);
+  });
+
+  test("C115 falha apos o upsert de uma proposicao desfaz tudo e sincronizarConsultas segue sem lancar", async () => {
+    await semear(["12", "13"], "senado:9001", APRESENTACAO);
+    for (const cod of ["12", "13"]) {
+      await semearConsultaTabela(cod, 777, 333, APURADO_NOVO);
+      await semearEventoComResumo("senado:9001", `senado:${cod}:2026-10`, "2026-10-20T12:00:00.000Z", 1, 2);
+    }
+    const antes = await detalhes();
+    // o delete dos antigos falha depois do upsert do canonico da 1a proposicao
+    await bloquearRemocaoEventos();
+    const falhou = await normalizarEventosConsulta().then(
+      () => false,
+      () => true,
+    );
+    expect(falhou).toBe(true);
+    expect(await detalhes()).toEqual(antes);
+
+    simularFetch({});
+    const saida = await sincronizarConsultas().catch((e: unknown) => e);
+    expect(saida).not.toBeInstanceOf(Error);
+    expect(logs.join("\n")).toContain("consultas: normalizacao dos eventos falhou");
+    expect(await detalhes()).toEqual(antes);
+  });
+
+  test("C116 proposicao com consulta mas sem primeiro signatario nao cria nem apaga evento", async () => {
+    await sql`insert into parlamentar (id, casa, id_externo, nome, busca)
+      values ('senado:9001', 'senado', '9001', 'Parlamentar Teste', 'parlamentar teste')`;
+    await sql`insert into proposicao (id, casa, id_externo, sigla_tipo, numero, ano, data_apresentacao)
+      values ('senado:12', 'senado', '12', 'PL', 1, 2026, ${APRESENTACAO})`;
+    await semearConsultaTabela("12", 777, 333, APURADO_NOVO);
+    await semearEventoComResumo("senado:9001", "senado:12:2026-10", "2026-10-20T12:00:00.000Z", 1, 2);
+    const antes = await detalhes();
+    expect(await normalizarEventosConsulta()).toBe(0);
+    expect(await detalhes()).toEqual(antes);
+    expect(antes).toHaveLength(1);
   });
 });
 
