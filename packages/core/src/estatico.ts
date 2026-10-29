@@ -86,7 +86,7 @@ export interface CompactoDespesa extends CompactoBase {
   total: number;
   porCategoria: { categoria: string; valor: number }[];
 }
-// Números congelados no card (vêm de evento.resumo, não da última leitura da consulta).
+// Números do card vêm de evento.resumo, que o ingest atualiza a cada releitura da consulta.
 export interface CompactoConsulta extends CompactoBase {
   tipo: "consulta_publica";
   proposicao: ProposicaoResumo;

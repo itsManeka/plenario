@@ -206,7 +206,7 @@ export const despesa = pgTable(
 //   voto              -> votacao.id
 //   proposicao        -> proposicao.id
 //   despesa_mensal    -> "<ano>-<mes2>" (ex.: "2026-09"), totalizado de `despesa`
-//   consulta_publica  -> "<proposicao_id>:<AAAA-MM>" (mes da apuracao; numeros congelados em `resumo`)
+//   consulta_publica  -> "<proposicao_id>:<AAAA-MM>" (mes da apresentacao; um por proposicao, `resumo` com o placar da ultima leitura)
 export const evento = pgTable(
   "evento",
   {

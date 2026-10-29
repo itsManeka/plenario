@@ -120,9 +120,19 @@ coletivo dizer o contrário na issue.
    autores sem `ordem`): nesse caso a leitura vai para `consulta_publica` e nenhum evento é gerado. O card é do tipo "prédio" (cabeçalho "Consulta pública · Senado · data", autor
    citado no corpo), porque quem votou foi o público. Item sem parlamentar exigiria
    `evento.parlamentar_id` nulo ou rota nova: fica para o coletivo, se quiser.
-3. **Quando gerar evento:** no máximo um por mês por proposição. `ref_id = <proposicao_id>:<AAAA-MM>`
-   do mês da apuração, com sim, não e `apuradoEm` congelados em `resumo`. Cada card é um fato
-   datado que não muda depois. A tabela `consulta_publica` guarda sempre a última leitura.
+3. **Quando gerar evento:** um por proposição. A página não informa quando a consulta abriu (só
+   "Votos apurados até"), e toda matéria em tramitação no Senado fica aberta a opinião, então a
+   consulta nasce com a proposição: `ocorrido_em` é `proposicao.data_apresentacao` e, se ela faltar,
+   o `apuradoEm` da leitura. `ref_id = <proposicao_id>:<AAAA-MM>` com o mês de `ocorrido_em` no fuso
+   de Brasília, estável entre leituras. Cada releitura atualiza sim, não e `apuradoEm` no `resumo`
+   do evento, sem mudar `ocorrido_em`, e leitura mais antiga que a gravada não regride o placar; o
+   card mostra a mesma leitura que `consulta_publica` guarda. Na mesma transação o ingest apaga os
+   outros eventos `consulta_publica` da proposição (`ref_id` fora do canônico, de qualquer
+   parlamentar), o que limpa os eventos mensais de antes e o que nasce quando a data de
+   apresentação aparece depois do fallback. O placar atrasa no máximo uma volta do rodízio (decisão
+   6). O card de consulta fica separado do card da proposição, mesmo caindo no mesmo dia, e a página
+   interna da proposição não mostra o placar: o card leva para ela e o link oficial para o
+   e-Cidadania.
 4. **Aviso fixo (texto exato):**
    > Enquete aberta no e-Cidadania: cada pessoa cadastrada vota uma vez. Não representa a população.
 5. **Elegibilidade:** proposições do Senado já ingeridas (`proposicao`, `casa = 'senado'`). A tabela
@@ -163,7 +173,7 @@ coletivo dizer o contrário na issue.
 |---|---|
 | `packages/core` | Aditiva: tabela `consulta_publica` (`materia_cod`, `proposicao_id`, `votos_sim`, `votos_nao`, `apurado_em`, `url_fonte`) e valor `consulta_publica` em `evento_tipo`; `FeedItemConsulta` na união `FeedItem`. Subpath novo `@plenario/core/fonte` (`urlFonteConsultaValida`, `HOST_FONTE`): a regra do `url_fonte` (https, host `www12.senado.leg.br`, sem usuário/senha) fica num lugar só, usada por ingest, api e export; o web não importa. |
 | `apps/ingest` | `buscarTexto` em `http.ts` (mesma fila, backoff e UA); parser puro com testes e fixtures; `senado/consultas.ts` com teto e intervalo, cursor `senado:consultas`. Falha de leitura pula e loga, nunca grava zero. |
-| `apps/api` | `consulta_publica` em `TIPOS` (`tipos=` aceita o valor; os quatro juntos = sem filtro). O item lê votos e `apuradoEm` do `resumo` do evento (congelados na leitura) e o `urlFonte` de `consulta_publica.url_fonte`; com mais de uma linha para a mesma proposição vale a de `apurado_em` mais recente. `ref_id` é `<proposicao_id>:<AAAA-MM>`, partido no último `:`. Evento com `ref_id` fora do formato, `resumo` inválido, `url_fonte` fora da regra do core ou consulta/proposição ausente é omitido sem quebrar o cursor. `tipos=` com mais de 200 caracteres = 400. O select de eventos só ganhou a coluna `resumo`, sem join novo. Sem índice em `consulta_publica.proposicao_id`: com 5 mil linhas o seq scan da página e do `on delete cascade` fica abaixo de 1 ms, e o export lê a tabela inteira de qualquer forma; reavaliar se a tabela passar de ~100 mil linhas. |
+| `apps/api` | `consulta_publica` em `TIPOS` (`tipos=` aceita o valor; os quatro juntos = sem filtro). O item lê votos e `apuradoEm` do `resumo` do evento (atualizados a cada releitura) e o `urlFonte` de `consulta_publica.url_fonte`; com mais de uma linha para a mesma proposição vale a de `apurado_em` mais recente. `ref_id` é `<proposicao_id>:<AAAA-MM>`, partido no último `:`. Evento com `ref_id` fora do formato, `resumo` inválido, `url_fonte` fora da regra do core ou consulta/proposição ausente é omitido sem quebrar o cursor. `tipos=` com mais de 200 caracteres = 400. O select de eventos só ganhou a coluna `resumo`, sem join novo. Sem índice em `consulta_publica.proposicao_id`: com 5 mil linhas o seq scan da página e do `on delete cascade` fica abaixo de 1 ms, e o export lê a tabela inteira de qualquer forma; reavaliar se a tabela passar de ~100 mil linhas. |
 | `apps/export` | Fluxo `consulta_publica` no export estático (`feed/<id>/consulta_publica/` e `feed/geral/consulta_publica/`), com a mesma regra de parse, validação e consulta mais recente da API. |
 | `apps/web` | Modo estático: remonta o item de consulta. Trata 404 do fluxo `consulta_publica` como fluxo vazio (site publicado antes do fluxo existir continua carregando os outros tipos); **transitório**: remover quando o export com `consulta_publica` estiver publicado no site. Card de consulta no formato de prédio, no molde do card de votação agrupada (sim e não com texto e ícone, totais pt-BR, "Votos apurados até", aviso, link oficial) e chip "Consultas". |
 
@@ -193,7 +203,7 @@ coletivo dizer o contrário na issue.
 > **Efeito.** `core`: tabela nova `consulta_publica` e valor `consulta_publica` em `evento_tipo`
 > (aditivo). `ingest`: leitor de HTML lento com parser estrito e os primeiros testes do pacote.
 > `api`: novo tipo no feed. `web`: card de consulta e chip de filtro. O evento fica no primeiro
-> signatário, no máximo um por mês por proposição, com os números congelados.
+> signatário, um por proposição, datado pela apresentação da matéria e com o placar da última leitura.
 >
 > **Perguntas ao coletivo.**
 > 1. Placar do e-Cidadania cabe em "só dado oficial"?
