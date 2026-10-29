@@ -1,5 +1,53 @@
 import { expect, test } from "bun:test";
-import { ordenarPorMicrossegundo } from "./ordem";
+import { ordenarPorMicrossegundo, primeiraQuebraDeOrdem } from "./ordem";
+
+test("primeiraQuebraDeOrdem: lista em ordem devolve null", () => {
+  const itens = [
+    { id: "3", ocorridoEm: "2026-09-07T00:00:00.000Z" },
+    { id: "2", ocorridoEm: "2026-09-06T00:00:00.000Z" },
+  ];
+  expect(primeiraQuebraDeOrdem(itens, new Map())).toBeNull();
+});
+
+test("primeiraQuebraDeOrdem: ms distintos trocados devolve o indice da quebra", () => {
+  const itens = [
+    { id: "2", ocorridoEm: "2026-09-06T00:00:00.000Z" },
+    { id: "3", ocorridoEm: "2026-09-07T00:00:00.000Z" },
+  ];
+  expect(primeiraQuebraDeOrdem(itens, new Map())).toBe(1);
+});
+
+test("primeiraQuebraDeOrdem: mesmo ms com us em ordem real e id invertido nao acusa", () => {
+  const itens = [
+    { id: "3", ocorridoEm: "2026-09-07T00:00:00.000Z" },
+    { id: "5", ocorridoEm: "2026-09-07T00:00:00.000Z" },
+  ];
+  const us = new Map<string, bigint>([
+    ["3", 2_000n],
+    ["5", 1_000n],
+  ]);
+  expect(primeiraQuebraDeOrdem(itens, us)).toBeNull();
+});
+
+test("primeiraQuebraDeOrdem: mesmo us com id crescente acusa a quebra do desempate", () => {
+  const itens = [
+    { id: "9", ocorridoEm: "2026-09-07T00:00:00.000Z" },
+    { id: "10", ocorridoEm: "2026-09-07T00:00:00.000Z" },
+  ];
+  const us = new Map<string, bigint>([
+    ["9", 5n],
+    ["10", 5n],
+  ]);
+  expect(primeiraQuebraDeOrdem(itens, us)).toBe(1);
+});
+
+test("ordenarPorMicrossegundo: ms distintos ordenam por tempo desc", () => {
+  const itens = [
+    { id: "9", ocorridoEm: "2026-09-06T00:00:00.000Z" },
+    { id: "1", ocorridoEm: "2026-09-07T00:00:00.000Z" },
+  ];
+  expect(ordenarPorMicrossegundo(itens, new Map()).map((i) => i.id)).toEqual(["1", "9"]);
+});
 
 const MS = "2026-01-01T00:00:00.000Z";
 

@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { sql } from "@plenario/core/db";
 import type { FeedItem, FeedItemTipo, Pagina } from "@plenario/core/api";
 import { TIPOS_FEED, caminhos, type PaginaFeed } from "@plenario/core/estatico";
-import { ordenarPorMicrossegundo } from "./ordem";
+import { ordenarPorMicrossegundo, primeiraQuebraDeOrdem } from "./ordem";
 
 const arg = (nome: string) => {
   const i = process.argv.indexOf(nome);
@@ -99,7 +99,20 @@ let itensConferidos = 0;
 for (const id of feedParls) {
   const fluxos = await Promise.all(TIPOS_FEED.map((t) => fluxo((n) => caminhos.feed(id, t, n))));
   const todos = fluxos.flat();
-  const merge = ordenarPorMicrossegundo(todos, await usDosIds(todos.map((i) => i.id)));
+  const usPorId = await usDosIds(todos.map((i) => i.id));
+  const merge = ordenarPorMicrossegundo(todos, usPorId);
+  // o merge reordena, entao a ordem de cada arquivo exportado e conferida a parte
+  TIPOS_FEED.forEach((tipo, k) => {
+    const fluxoTipo = fluxos[k]!;
+    conferir(`feed ${id} ${tipo} ordem`, () => {
+      const q = primeiraQuebraDeOrdem(fluxoTipo, usPorId);
+      if (q !== null) {
+        throw new Error(
+          `fora de ordem no indice ${q}: ids ${fluxoTipo[q - 1]!.id} (${fluxoTipo[q - 1]!.ocorridoEm}, us ${usPorId.get(fluxoTipo[q - 1]!.id) ?? "?"}), ${fluxoTipo[q]!.id} (${fluxoTipo[q]!.ocorridoEm}, us ${usPorId.get(fluxoTipo[q]!.id) ?? "?"})`,
+        );
+      }
+    });
+  });
   const api = await apiPaginada(`/parlamentares/${id}/feed`);
   itensConferidos += api.length;
   conferir(`feed ${id} ids`, () => deepStrictEqual(merge.map((i) => i.id), api.map((i) => i.id)));
