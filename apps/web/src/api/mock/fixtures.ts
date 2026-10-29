@@ -2,6 +2,7 @@ import type {
   Casa,
   FeedItem,
   Parlamentar,
+  ParlamentarResumo,
   ProposicaoDetalhe,
   ProposicaoResumo,
   VotacaoDetalhe,
@@ -340,12 +341,22 @@ for (const p of parlamentares.filter((x) => x.casa === "camara")) {
 const senado = proposicoes.filter((p) => p.casa === "senado");
 const instanteConsulta = (diasAtras: number): string =>
   new Date(AGORA - diasAtras * DIA - 3_600_000).toISOString();
-const proponente = (p: ProposicaoDetalhe) => p.autores[0]!.parlamentar;
+// Falha com mensagem clara se a semente/ordem dos dados mudar (sem `!` solto).
+function senadoEm(i: number): ProposicaoDetalhe {
+  const p = senado[i];
+  if (!p) throw new Error(`fixtures de consulta: proposicao do Senado #${i} ausente`);
+  return p;
+}
+const proponente = (p: ProposicaoDetalhe): ParlamentarResumo => {
+  const autor = p.autores[0];
+  if (!autor) throw new Error(`fixtures de consulta: proposicao ${p.rotulo} sem autor`);
+  return autor.parlamentar;
+};
 const comAutor = (
   base: ProposicaoDetalhe,
   id: string,
   numero: number,
-  autor: ReturnType<typeof resumo>,
+  autor: ParlamentarResumo,
 ): ProposicaoDetalhe => ({
   ...base,
   id,
@@ -355,14 +366,14 @@ const comAutor = (
   autores: [{ parlamentar: autor, proponente: true, ordem: 1 }],
 });
 
-const autorDoPerfil = proponente(senado[3]!);
+const autorDoPerfil = proponente(senadoEm(3));
 const consultas: { prop: ProposicaoDetalhe; dias: number; sim: number; nao: number }[] = [
-  { prop: senado[0]!, dias: 4, sim: 412876, nao: 198043 }, // números grandes (overflow e pt-BR)
-  { prop: senado[1]!, dias: 9, sim: 37, nao: 12 }, // números pequenos
-  { prop: senado[2]!, dias: 20, sim: 0, nao: 58 }, // zero no Sim
+  { prop: senadoEm(0), dias: 4, sim: 412876, nao: 198043 }, // números grandes (overflow e pt-BR)
+  { prop: senadoEm(1), dias: 9, sim: 37, nao: 12 }, // números pequenos
+  { prop: senadoEm(2), dias: 20, sim: 0, nao: 58 }, // zero no Sim
   // dois do mesmo autor, para o filtro "Consultas" no Perfil
-  { prop: comAutor(senado[3]!, "senado:3900101", 1101, autorDoPerfil), dias: 2, sim: 5120, nao: 1877 },
-  { prop: comAutor(senado[3]!, "senado:3900102", 1102, autorDoPerfil), dias: 13, sim: 301, nao: 0 },
+  { prop: comAutor(senadoEm(3), "senado:3900101", 1101, autorDoPerfil), dias: 2, sim: 5120, nao: 1877 },
+  { prop: comAutor(senadoEm(3), "senado:3900102", 1102, autorDoPerfil), dias: 13, sim: 301, nao: 0 },
 ];
 for (const c of consultas) {
   const apuradoEm = instanteConsulta(c.dias);

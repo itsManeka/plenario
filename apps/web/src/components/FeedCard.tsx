@@ -23,7 +23,7 @@ import {
   semPassagemAerea,
   partidoUf,
 } from "../lib/format";
-import { IconeDiferente, IconeIgual, IconeNao, IconePredio, IconeSim } from "./Icones";
+import { IconeDiferente, IconeIgual, IconePredio } from "./Icones";
 import { Avatar, Etiqueta, FonteLink, Tempo, VotoSelo } from "./ui";
 
 export function hrefParlamentar(id: string) {
@@ -259,6 +259,10 @@ export function FeedCard({ item }: { item: FeedItem }) {
 const AVISO_CONSULTA =
   "Enquete aberta no e-Cidadania: cada pessoa cadastrada vota uma vez. Não representa a população.";
 
+/** Classe do `<article>` dos cards "prédio" (consulta pública e votação agrupada). */
+const CLASSE_CARD_PREDIO =
+  "relative flex gap-3 border-b border-line px-4 py-3.5 transition-colors has-[.stretched:hover]:bg-sunken/60 has-[.stretched:focus-visible]:bg-sunken/60";
+
 /**
  * Consulta pública do e-Cidadania (Senado): quem votou foi o público, então o card é do tipo
  * "prédio", com o autor citado no corpo. Texto neutro: só os totais, sem percentual nem barra.
@@ -267,7 +271,7 @@ function CardConsulta({ item }: { item: FeedItemConsulta }) {
   const pr = item.proposicao;
   const p = item.parlamentar;
   return (
-    <article className="relative flex gap-3 border-b border-line px-4 py-3.5 transition-colors has-[.stretched:hover]:bg-sunken/60 has-[.stretched:focus-visible]:bg-sunken/60">
+    <article className={CLASSE_CARD_PREDIO}>
       <span
         aria-hidden="true"
         className="grid size-11 shrink-0 place-items-center self-start rounded-full border border-line bg-sunken text-muted"
@@ -279,14 +283,10 @@ function CardConsulta({ item }: { item: FeedItemConsulta }) {
           Consulta pública · {CASA_NOME[pr.casa]} · <Tempo iso={item.ocorridoEm} />
         </p>
         <p className="mt-1 text-[15px] leading-6 text-ink">
-          Consulta pública sobre{" "}
           <Link to={hrefProposicao(pr.id)} className="stretched font-semibold hover:underline">
             {pr.rotulo}
-          </Link>
-        </p>
-        {pr.ementa && <p className="mt-1 line-clamp-3 text-sm leading-5 text-ink-2">{pr.ementa}</p>}
-        <p className="mt-1 text-sm leading-5 text-muted">
-          Autoria:{" "}
+          </Link>{" "}
+          — de{" "}
           <Link
             to={hrefParlamentar(p.id)}
             className="above-stretch font-medium text-ink-2 hover:underline"
@@ -295,18 +295,15 @@ function CardConsulta({ item }: { item: FeedItemConsulta }) {
           </Link>{" "}
           ({partidoUf(p)})
         </p>
+        {pr.ementa && <p className="mt-1 line-clamp-3 text-sm leading-5 text-ink-2">{pr.ementa}</p>}
         <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm">
-          <li className="inline-flex items-center gap-1.5 tabular-nums text-ink">
-            <IconeSim tamanho={16} />
-            <span>
-              Sim: <span className="font-semibold">{num(item.votosSim)}</span>
-            </span>
+          <li className="inline-flex items-center gap-1.5 tabular-nums">
+            <VotoSelo voto="sim" compacto />
+            <span className="font-semibold">{num(item.votosSim)}</span>
           </li>
-          <li className="inline-flex items-center gap-1.5 tabular-nums text-ink">
-            <IconeNao tamanho={16} />
-            <span>
-              Não: <span className="font-semibold">{num(item.votosNao)}</span>
-            </span>
+          <li className="inline-flex items-center gap-1.5 tabular-nums">
+            <VotoSelo voto="nao" compacto />
+            <span className="font-semibold">{num(item.votosNao)}</span>
           </li>
         </ul>
         <p className="mt-1.5 text-sm text-muted">
@@ -334,7 +331,7 @@ export function CardGrupoVotacao({ itens }: { itens: FeedItemVoto[] }) {
   const mostrados = aberto ? itens : itens.slice(0, VISIVEIS_GRUPO);
   const ocultos = itens.length - mostrados.length;
   return (
-    <article className="relative flex gap-3 border-b border-line px-4 py-3.5 transition-colors has-[.stretched:hover]:bg-sunken/60 has-[.stretched:focus-visible]:bg-sunken/60">
+    <article className={CLASSE_CARD_PREDIO}>
       <span
         aria-hidden="true"
         className="grid size-11 shrink-0 place-items-center self-start rounded-full border border-line bg-sunken text-muted"
