@@ -158,6 +158,7 @@ EMENTAS.forEach((ementa, i) => {
     dataApresentacao: diasAtras(inteiro(1, 75), 13),
     autores,
     votacoes: [],
+    consulta: null,
   });
 });
 

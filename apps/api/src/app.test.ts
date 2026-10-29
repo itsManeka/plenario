@@ -657,10 +657,120 @@ describe("detalhes", () => {
     expect(body.dataApresentacao).toBe("2026-09-01T12:00:00.000Z");
   });
 
-  test("partidos", async () => {
-    const { body, res } = await get<{ sigla: string; total: number }[]>("/partidos");
+  test("partidos", async () => {    const { body, res } = await get<{ sigla: string; total: number }[]>("/partidos");
     expect(body[0]).toEqual({ sigla: "PT", total: 3 });
     expect(res.headers.get("cache-control")).toContain("max-age=60");
+  });
+});
+
+const URL_PLACAR = "https://www12.senado.leg.br/ecidadania/visualizacaomateria?id=";
+
+async function semearPlacar(i: string, linhas: [string, number, number, string, string][]): Promise<string> {
+  const id = "camara:pl" + i;
+  await sql`insert into proposicao (id, casa, id_externo, sigla_tipo, numero, ano) values (${id}, 'camara', ${"pl" + i}, 'PL', ${Number(i)}, 2026)`;
+  for (const [cod, sim, nao, quando, url] of linhas) {
+    await sql`insert into consulta_publica (materia_cod, proposicao_id, votos_sim, votos_nao, apurado_em, url_fonte)
+      values (${cod}, ${id}, ${sim}, ${nao}, ${quando}::timestamptz, ${url})`;
+  }
+  return id;
+}
+
+async function limparPlacares(): Promise<void> {
+  await sql`delete from proposicao where id like 'camara:pl%'`; // consulta_publica cai por cascade
+}
+
+describe("proposição: placar da consulta pública", () => {
+  test("C120: devolve votosSim, votosNao, apuradoEm e urlFonte exatos da linha", async () => {
+    try {
+      const id = await semearPlacar("11", [["pm11", 137, 58, "2026-09-28T10:00:00Z", URL_PLACAR + "11"]]);
+      const { status, body } = await get<ProposicaoDetalhe>(`/proposicoes/${id}`);
+      expect(status).toBe(200);
+      expect(body.consulta).toEqual({ votosSim: 137, votosNao: 58, apuradoEm: "2026-09-28T10:00:00.000Z", urlFonte: URL_PLACAR + "11" });
+    } finally {
+      await limparPlacares();
+    }
+  });
+
+  test("C121: proposição sem linha em consulta_publica => consulta null", async () => {
+    try {
+      const id = await semearPlacar("12", []);
+      const { body } = await get<ProposicaoDetalhe>(`/proposicoes/${id}`);
+      expect(body.consulta).toBeNull();
+    } finally {
+      await limparPlacares();
+    }
+  });
+
+  test("C122: duas linhas => vale a de apurado_em maior, independente da ordem de inserção", async () => {
+    try {
+      const id = await semearPlacar("13", [
+        ["pm13b", 20, 10, "2026-09-29T10:00:00Z", URL_PLACAR + "13b"],
+        ["pm13a", 1, 2, "2026-09-20T10:00:00Z", URL_PLACAR + "13a"],
+      ]);
+      const { body } = await get<ProposicaoDetalhe>(`/proposicoes/${id}`);
+      expect(body.consulta).toEqual({ votosSim: 20, votosNao: 10, apuradoEm: "2026-09-29T10:00:00.000Z", urlFonte: URL_PLACAR + "13b" });
+    } finally {
+      await limparPlacares();
+    }
+  });
+
+  test("C123: url_fonte fora da regra (host não-Senado ou http) => consulta null", async () => {
+    try {
+      const a = await semearPlacar("14", [["pm14", 5, 6, "2026-09-28T10:00:00Z", "https://evil.example.com/ecidadania?id=14"]]);
+      const b = await semearPlacar("15", [["pm15", 5, 6, "2026-09-28T10:00:00Z", "http://www12.senado.leg.br/ecidadania/visualizacaomateria?id=15"]]);
+      expect((await get<ProposicaoDetalhe>(`/proposicoes/${a}`)).body.consulta).toBeNull();
+      expect((await get<ProposicaoDetalhe>(`/proposicoes/${b}`)).body.consulta).toBeNull();
+    } finally {
+      await limparPlacares();
+    }
+  });
+
+  test("C124: preserva 0 legítimo (0 x 58)", async () => {
+    try {
+      const id = await semearPlacar("16", [["pm16", 0, 58, "2026-09-28T10:00:00Z", URL_PLACAR + "16"]]);
+      const { body } = await get<ProposicaoDetalhe>(`/proposicoes/${id}`);
+      expect(body.consulta).not.toBeNull();
+      expect(body.consulta?.votosSim).toBe(0);
+      expect(body.consulta?.votosNao).toBe(58);
+    } finally {
+      await limparPlacares();
+    }
+  });
+
+  test("C125: votos negativos ou apurado_em que não parseia => consulta null, nunca 0 x 0", async () => {
+    try {
+      const a = await semearPlacar("17", [["pm17", -1, 58, "2026-09-28T10:00:00Z", URL_PLACAR + "17"]]);
+      const b = await semearPlacar("18", [["pm18", 3, -4, "2026-09-28T10:00:00Z", URL_PLACAR + "18"]]);
+      const c = await semearPlacar("19", [["pm19", 3, 4, "infinity", URL_PLACAR + "19"]]);
+      for (const id of [a, b, c]) {
+        const { status, body } = await get<ProposicaoDetalhe>(`/proposicoes/${id}`);
+        expect(status).toBe(200);
+        expect(body.consulta).toBeNull();
+      }
+    } finally {
+      await limparPlacares();
+    }
+  });
+
+  test("C126: duas proposições com consultas distintas devolvem cada uma o próprio placar", async () => {
+    try {
+      const a = await semearPlacar("21", [["pm21", 11, 12, "2026-09-28T10:00:00Z", URL_PLACAR + "21"]]);
+      const b = await semearPlacar("22", [["pm22", 31, 32, "2026-09-27T10:00:00Z", URL_PLACAR + "22"]]);
+      const ra = await get<ProposicaoDetalhe>(`/proposicoes/${a}`);
+      const rb = await get<ProposicaoDetalhe>(`/proposicoes/${b}`);
+      expect([ra.body.consulta?.votosSim, ra.body.consulta?.votosNao]).toEqual([11, 12]);
+      expect([rb.body.consulta?.votosSim, rb.body.consulta?.votosNao]).toEqual([31, 32]);
+    } finally {
+      await limparPlacares();
+    }
+  });
+
+  test("C127: proposição existente sem consulta segue com consulta null e demais campos", async () => {
+    const { status, body } = await get<ProposicaoDetalhe>("/proposicoes/camara:p1");
+    expect(status).toBe(200);
+    expect(body.consulta).toBeNull();
+    expect(body.autores.map((a) => a.parlamentar.id)).toEqual(["camara:1", "camara:3"]);
+    expect(body.votacoes[0]?.id).toBe("camara:v6");
   });
 });
 

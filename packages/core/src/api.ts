@@ -115,10 +115,20 @@ export interface VotacaoDetalhe extends VotacaoResumo {
   votos: { parlamentar: ParlamentarResumo; voto: VotoTipo }[];
 }
 
+// Placar da consulta pública do e-Cidadania (Senado). Leitura de `consulta_publica`, a mais recente.
+export interface ConsultaPlacar {
+  votosSim: number;
+  votosNao: number;
+  apuradoEm: string; // ISO-8601 UTC
+  urlFonte: string; // página oficial da consulta (e-Cidadania)
+}
+
 export interface ProposicaoDetalhe extends ProposicaoResumo {
   dataApresentacao: string | null;
   autores: { parlamentar: ParlamentarResumo; proponente: boolean; ordem: number | null }[];
   votacoes: VotacaoResumo[];
+  // linha de `consulta_publica` com `apurado_em` mais recente; null = proposição sem consulta lida
+  consulta: ConsultaPlacar | null;
 }
 
 export interface ErroApi {
@@ -150,7 +160,7 @@ export interface PartidoResumo {
 //        tipos: lista separada por vírgula de voto, proposicao, despesa_mensal, consulta_publica;
 //        ausente = todos os tipos; valor fora da lista = 400
 //   GET /votacoes/:id                    -> VotacaoDetalhe
-//   GET /proposicoes/:id                 -> ProposicaoDetalhe
+//   GET /proposicoes/:id                 -> ProposicaoDetalhe (campo `consulta`: ConsultaPlacar | null)
 //   GET /partidos                        -> PartidoResumo[]
 //
 // Paginação: cursor por (ocorridoEm desc, id desc), página de 30.
