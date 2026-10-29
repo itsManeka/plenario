@@ -48,32 +48,75 @@ describe("mesDaApuracao", () => {
 describe("montarEvento", () => {
   const autores = [autor("senado:1", 1), autor("senado:2", 2)];
 
-  test("C28: mesma apuracao reproduz refId e parlamentar; outro mes muda o refId", () => {
-    const a = montarEvento({ proposicaoId: "senado:p9", autores, leitura: leituraOk() });
-    const b = montarEvento({ proposicaoId: "senado:p9", autores, leitura: leituraOk() });
-    const outroMes = montarEvento({
-      proposicaoId: "senado:p9",
-      autores,
-      leitura: leituraOk({ apuradoEm: new Date("2026-11-15T12:00:00Z") }),
-    });
-    if (!a || !b || !outroMes) throw new Error("evento esperado");
+  const apresentada = new Date("2023-05-10T15:00:00Z");
+
+  test("C28: mesma leitura reproduz refId e parlamentar; apuracao em outro mes nao muda o refId", () => {
+    const a = montarEvento({ proposicaoId: "senado:p9", autores, leitura: leituraOk(), dataApresentacao: null });
+    const b = montarEvento({ proposicaoId: "senado:p9", autores, leitura: leituraOk(), dataApresentacao: null });
+    if (!a || !b) throw new Error("evento esperado");
     expect(a.refId).toBe("senado:p9:2026-10");
     expect(b.refId).toBe(a.refId);
     expect(b.parlamentarId).toBe(a.parlamentarId);
     expect(b.parlamentarId).toBe("senado:1");
-    expect(outroMes.refId).toBe("senado:p9:2026-11");
+  });
+
+  test("C92: dataApresentacao presente vira ocorridoEm (nao apuradoEm)", () => {
+    const ev = montarEvento({ proposicaoId: "senado:p9", autores, leitura: leituraOk(), dataApresentacao: apresentada });
+    expect(ev?.ocorridoEm).toEqual(new Date("2023-05-10T15:00:00Z"));
+    expect(ev?.refId).toBe("senado:p9:2023-05");
+  });
+
+  test("C93: dataApresentacao nula cai no apuradoEm, com o mes dele no refId", () => {
+    const ev = montarEvento({ proposicaoId: "senado:p9", autores, leitura: leituraOk(), dataApresentacao: null });
+    expect(ev?.ocorridoEm).toEqual(new Date("2026-10-28T13:18:46Z"));
+    expect(ev?.refId).toBe("senado:p9:2026-10");
+  });
+
+  test("C94: leituras de meses diferentes da mesma proposicao geram o mesmo refId", () => {
+    const a = montarEvento({ proposicaoId: "senado:p9", autores, leitura: leituraOk(), dataApresentacao: apresentada });
+    const b = montarEvento({
+      proposicaoId: "senado:p9",
+      autores,
+      leitura: leituraOk({ apuradoEm: new Date("2026-11-15T12:00:00Z") }),
+      dataApresentacao: apresentada,
+    });
+    if (!a || !b) throw new Error("evento esperado");
+    expect(b.refId).toBe(a.refId);
+    expect(b.refId).toBe("senado:p9:2023-05");
+  });
+
+  test("C95: apresentacao em 00:00 BRT do dia 1 fica no mes local, nao no do UTC", () => {
+    const ev = montarEvento({
+      proposicaoId: "senado:p9",
+      autores,
+      leitura: leituraOk(),
+      dataApresentacao: new Date("2023-10-01T03:00:00Z"),
+    });
+    expect(ev?.refId).toBe("senado:p9:2023-10");
+    const vespera = montarEvento({
+      proposicaoId: "senado:p9",
+      autores,
+      leitura: leituraOk(),
+      dataApresentacao: new Date("2023-10-01T02:59:59Z"), // 30/09 23:59:59 BRT
+    });
+    expect(vespera?.refId).toBe("senado:p9:2023-09");
   });
 
   test("C30: sem primeiro signatario devolve null", () => {
     expect(
-      montarEvento({ proposicaoId: "senado:p9", autores: [autor("a", null), autor("b", null)], leitura: leituraOk() }),
+      montarEvento({
+        proposicaoId: "senado:p9",
+        autores: [autor("a", null), autor("b", null)],
+        leitura: leituraOk(),
+        dataApresentacao: null,
+      }),
     ).toBeNull();
-    expect(montarEvento({ proposicaoId: "senado:p9", autores: [], leitura: leituraOk() })).toBeNull();
+    expect(montarEvento({ proposicaoId: "senado:p9", autores: [], leitura: leituraOk(), dataApresentacao: null })).toBeNull();
   });
 
-  test("C31: congela os numeros em resumo, sem rotulo, com ocorridoEm = apuradoEm", () => {
+  test("C31: guarda os numeros em resumo, sem rotulo; sem apresentacao ocorridoEm = apuradoEm", () => {
     const leitura = leituraOk({ votosSim: 721508, votosNao: 1142443 });
-    const ev = montarEvento({ proposicaoId: "senado:p9", autores, leitura });
+    const ev = montarEvento({ proposicaoId: "senado:p9", autores, leitura, dataApresentacao: null });
     expect(ev).toEqual({
       parlamentarId: "senado:1",
       tipo: "consulta_publica",

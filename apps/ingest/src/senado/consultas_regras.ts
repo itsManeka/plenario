@@ -97,15 +97,19 @@ export function montarEvento(args: {
   proposicaoId: string;
   autores: readonly AutorOrdem[];
   leitura: Leitura;
+  /** `proposicao.data_apresentacao`; nula = fallback para `leitura.apuradoEm`. */
+  dataApresentacao: Date | null;
 }): EventoConsulta | null {
   const parlamentarId = primeiroSignatario(args.autores);
   if (parlamentarId === null) return null;
   const { leitura } = args;
+  // um evento por proposicao: data e mes do ref_id vem da apresentacao, estaveis entre leituras
+  const ocorridoEm = args.dataApresentacao ?? leitura.apuradoEm;
   return {
     parlamentarId,
     tipo: "consulta_publica",
-    ocorridoEm: leitura.apuradoEm,
-    refId: `${args.proposicaoId}:${mesDaApuracao(leitura.apuradoEm)}`,
+    ocorridoEm,
+    refId: `${args.proposicaoId}:${mesDaApuracao(ocorridoEm)}`,
     resumo: {
       votosSim: leitura.votosSim,
       votosNao: leitura.votosNao,

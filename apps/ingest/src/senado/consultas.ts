@@ -51,6 +51,7 @@ export function lerTetoConsultas(env: Readonly<Record<string, string | undefined
 
 interface CandidataLinha extends Candidata {
   idExterno: string;
+  dataApresentacao: Date | null;
 }
 
 const CHAVE_COD = /^[1-9][0-9]*$/;
@@ -113,6 +114,7 @@ export async function sincronizarConsultas(parcial?: { atual?: ResultadoConsulta
     .select({
       proposicaoId: schema.proposicao.id,
       idExterno: schema.proposicao.idExterno,
+      dataApresentacao: schema.proposicao.dataApresentacao,
       apuradoEm: schema.consultaPublica.apuradoEm,
     })
     .from(schema.proposicao)
@@ -203,6 +205,7 @@ export async function sincronizarConsultas(parcial?: { atual?: ResultadoConsulta
               proposicaoId: c.proposicaoId,
               autores: autoresPorProposicao.get(c.proposicaoId) ?? [],
               leitura: v.leitura,
+              dataApresentacao: c.dataApresentacao,
             });
             const l = v.leitura;
             const resultado = await db.transaction(async (tx) => {
@@ -231,14 +234,16 @@ export async function sincronizarConsultas(parcial?: { atual?: ResultadoConsulta
                 })
                 .returning({ materiaCod: schema.consultaPublica.materiaCod });
               if (gravadas.length === 0 || evento === null) return { gravou: gravadas.length > 0, evento: 0 };
-              const novos = await tx
+              // evento unico por proposicao: a releitura atualiza so o placar (ocorrido_em nunca muda)
+              const gravados = await tx
                 .insert(schema.evento)
                 .values(evento)
-                .onConflictDoNothing({
+                .onConflictDoUpdate({
                   target: [schema.evento.parlamentarId, schema.evento.tipo, schema.evento.refId],
+                  set: { resumo: dsql`excluded.resumo` },
                 })
                 .returning({ id: schema.evento.id });
-              return { gravou: true, evento: novos.length };
+              return { gravou: true, evento: gravados.length };
             }).catch((e: unknown): never => {
               throw new ErroGravacao(e);
             });

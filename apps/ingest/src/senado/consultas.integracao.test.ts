@@ -52,13 +52,19 @@ function simularFetch(porCod: Record<string, () => Response>): void {
 
 const ok = (cod: string, o?: OpcoesHtml) => (): Response => new Response(htmlConsulta(cod, o), { status: 200 });
 
-async function semear(codigos: string[], parlamentarId = "senado:9001"): Promise<void> {
+const APRESENTACAO = "2023-05-10T15:00:00Z";
+
+async function semear(
+  codigos: string[],
+  parlamentarId = "senado:9001",
+  dataApresentacao: string | null = null,
+): Promise<void> {
   await sql`insert into parlamentar (id, casa, id_externo, nome, busca)
     values (${parlamentarId}, 'senado', '9001', 'Parlamentar Teste', 'parlamentar teste')`;
   for (const cod of codigos) {
     const id = `senado:${cod}`;
-    await sql`insert into proposicao (id, casa, id_externo, sigla_tipo, numero, ano)
-      values (${id}, 'senado', ${cod}, 'PL', 1, 2026)`;
+    await sql`insert into proposicao (id, casa, id_externo, sigla_tipo, numero, ano, data_apresentacao)
+      values (${id}, 'senado', ${cod}, 'PL', 1, 2026, ${dataApresentacao})`;
     await sql`insert into proposicao_autor (proposicao_id, parlamentar_id, ordem) values (${id}, ${parlamentarId}, 1)`;
   }
 }
@@ -74,10 +80,36 @@ async function bloquearEventos(): Promise<void> {
   await sql`create trigger falha_evento_teste before insert on evento for each row execute function falha_evento_teste()`;
 }
 
+async function bloquearAtualizacaoEventos(): Promise<void> {
+  await sql`create or replace function falha_evento_update_teste() returns trigger language plpgsql as $$
+    begin raise exception 'update de evento bloqueado pelo teste'; end $$`;
+  await sql`create trigger falha_evento_update_teste before update on evento for each row execute function falha_evento_update_teste()`;
+}
+
 async function liberarEventos(): Promise<void> {
   await sql`drop trigger if exists falha_evento_teste on evento`;
   await sql`drop function if exists falha_evento_teste()`;
+  await sql`drop trigger if exists falha_evento_update_teste on evento`;
+  await sql`drop function if exists falha_evento_update_teste()`;
 }
+
+interface LinhaEvento {
+  ref_id: string;
+  ocorrido_em: Date | string;
+  sim: string;
+  nao: string;
+}
+
+const eventos = (): Promise<LinhaEvento[]> =>
+  sql<LinhaEvento[]>`select ref_id, ocorrido_em, resumo->>'votosSim' as sim, resumo->>'votosNao' as nao
+    from evento where tipo = 'consulta_publica' order by ref_id`;
+
+const placarTabela = async (cod: string): Promise<{ sim: string; nao: string }> => {
+  const [r] = await sql<
+    { sim: string; nao: string }[]
+  >`select votos_sim::text as sim, votos_nao::text as nao from consulta_publica where materia_cod = ${cod}`;
+  return r ?? { sim: "?", nao: "?" };
+};
 
 const contar = async (tabela: "consulta_publica" | "evento"): Promise<number> => {
   const [r] =
@@ -150,8 +182,8 @@ describe("setWhere: leitura mais antiga nao sobrescreve", () => {
     expect(await contar("evento")).toBe(1);
   });
 
-  test("C50 leitura com apurado_em igual ou mais nova sobrescreve a linha", async () => {
-    await semear(["160575"]);
+  test("C50 leitura com apurado_em igual ou mais nova sobrescreve a linha e atualiza o evento unico", async () => {
+    await semear(["160575"], "senado:9001", APRESENTACAO);
     simularFetch({ "160575": ok("160575", { sim: 100, apuracao: "28/10/2026 10:18:46" }) });
     await sincronizarConsultas();
 
@@ -159,7 +191,7 @@ describe("setWhere: leitura mais antiga nao sobrescreve", () => {
     const igual = await sincronizarConsultas();
     expect(igual.lidas).toBe(1);
     expect(igual.puladas).toBe(0);
-    expect(igual.eventos).toBe(0);
+    expect(igual.eventos).toBe(1);
     expect((await linha("160575"))?.votos_sim).toBe(200);
 
     simularFetch({ "160575": ok("160575", { sim: 300, apuracao: "29/11/2026 09:00:00" }) });
@@ -170,7 +202,7 @@ describe("setWhere: leitura mais antiga nao sobrescreve", () => {
     const l = await linha("160575");
     expect(l?.votos_sim).toBe(300);
     expect(instante(l)).toBe("2026-11-29T12:00:00.000Z");
-    expect(await contar("evento")).toBe(2);
+    expect(await contar("evento")).toBe(1);
   });
 });
 
@@ -229,6 +261,79 @@ describe("gravacao: rollback e contagem (T2)", () => {
     expect(await contar("consulta_publica")).toBe(0);
     expect(await linha("160575")).toBeUndefined();
     expect(await contar("evento")).toBe(0);
+  });
+
+  test("C96 duas rodadas em meses diferentes geram 1 evento com o placar da 2a e ocorrido_em da apresentacao", async () => {
+    await semear(["160575"], "senado:9001", APRESENTACAO);
+    simularFetch({ "160575": ok("160575", { sim: 100, nao: 50, apuracao: "28/10/2026 10:18:46" }) });
+    await sincronizarConsultas();
+    const antes = await eventos();
+    expect(antes).toHaveLength(1);
+    expect(new Date(antes[0]?.ocorrido_em ?? 0).toISOString()).toBe("2023-05-10T15:00:00.000Z");
+
+    simularFetch({ "160575": ok("160575", { sim: 300, nao: 70, apuracao: "29/11/2026 09:00:00" }) });
+    await sincronizarConsultas();
+    const depois = await eventos();
+    expect(depois).toHaveLength(1);
+    expect(depois[0]?.ref_id).toBe("senado:160575:2023-05");
+    expect(depois[0]?.sim).toBe("300");
+    expect(depois[0]?.nao).toBe("70");
+    expect(new Date(depois[0]?.ocorrido_em ?? 0).toISOString()).toBe("2023-05-10T15:00:00.000Z");
+  });
+
+  test("C97 leitura mais antiga que a gravada mantem tabela e evento com o placar anterior", async () => {
+    await semear(["160575"], "senado:9001", APRESENTACAO);
+    simularFetch({ "160575": ok("160575", { sim: 100, nao: 50, apuracao: "28/10/2026 10:18:46" }) });
+    await sincronizarConsultas();
+    simularFetch({ "160575": ok("160575", { sim: 999, nao: 888, apuracao: "15/09/2026 10:00:00" }) });
+    await sincronizarConsultas();
+    expect(await placarTabela("160575")).toEqual({ sim: "100", nao: "50" });
+    const ev = await eventos();
+    expect(ev).toHaveLength(1);
+    expect([ev[0]?.sim, ev[0]?.nao]).toEqual(["100", "50"]);
+  });
+
+  test("C98 resumo do evento fica igual ao placar de consulta_publica apos cada rodada", async () => {
+    await semear(["160575"], "senado:9001", APRESENTACAO);
+    const rodadas = [
+      { sim: 100, nao: 50, apuracao: "28/10/2026 10:18:46" },
+      { sim: 250, nao: 60, apuracao: "29/10/2026 08:00:00" },
+      { sim: 251, nao: 61, apuracao: "03/12/2026 08:00:00" },
+    ];
+    for (const o of rodadas) {
+      simularFetch({ "160575": ok("160575", o) });
+      await sincronizarConsultas();
+      const tabela = await placarTabela("160575");
+      const ev = await eventos();
+      expect(ev).toHaveLength(1);
+      expect({ sim: ev[0]?.sim, nao: ev[0]?.nao }).toEqual(tabela);
+      expect(tabela).toEqual({ sim: String(o.sim), nao: String(o.nao) });
+    }
+  });
+
+  test("C99 contador conta o evento gravado e rodada repetida nao cria linha nova", async () => {
+    await semear(["160575"], "senado:9001", APRESENTACAO);
+    simularFetch({ "160575": ok("160575", { sim: 100, nao: 50, apuracao: "28/10/2026 10:18:46" }) });
+    const r1 = await sincronizarConsultas();
+    expect(r1).toMatchObject({ lidas: 1, eventos: 1, falhas: 0 });
+    expect(await contar("evento")).toBe(1);
+    const r2 = await sincronizarConsultas();
+    expect(r2).toMatchObject({ lidas: 1, eventos: 1, falhas: 0 });
+    expect(await contar("evento")).toBe(1);
+  });
+
+  test("C100 falha ao atualizar o evento desfaz tambem o upsert de consulta_publica", async () => {
+    await semear(["160575"], "senado:9001", APRESENTACAO);
+    simularFetch({ "160575": ok("160575", { sim: 100, nao: 50, apuracao: "28/10/2026 10:18:46" }) });
+    await sincronizarConsultas();
+    await bloquearAtualizacaoEventos();
+    simularFetch({ "160575": ok("160575", { sim: 300, nao: 70, apuracao: "29/11/2026 09:00:00" }) });
+    const r = await sincronizarConsultas();
+    expect(r).toMatchObject({ lidas: 0, falhas: 1 });
+    expect(await placarTabela("160575")).toEqual({ sim: "100", nao: "50" });
+    const ev = await eventos();
+    expect(ev).toHaveLength(1);
+    expect([ev[0]?.sim, ev[0]?.nao]).toEqual(["100", "50"]);
   });
 
   test("C54 excecao de gravacao conta falhas, nao altera puladas e nao entra no mapa de puladas", async () => {
