@@ -25,6 +25,9 @@ Obrigado pelo interesse. Algumas regras para o projeto continuar confiável:
 - O `bun test` da raiz nao inclui o web: o `bunfig.toml` da raiz ignora `apps/web/**`, porque o web depende
   do preload de DOM dele (`apps/web/bunfig.toml`).
 - Convencao: o teste de componente fica ao lado do arquivo, como `NomeDoComponente.test.tsx`, e usa `bun:test`.
+- CI: `.github/workflows/testes.yml` roda em todo pull request e em push na main. Sobe um Postgres 16
+  descartavel (`plenario_test`), aplica o schema (`bun run db:push`) e roda `bun run typecheck` e o `bun test`
+  de `apps/api`, `apps/ingest`, `apps/export` e `apps/web`, um workspace por vez. Nao usa segredos.
 
 ## Boas primeiras tarefas
 

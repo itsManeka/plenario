@@ -11,6 +11,10 @@
 #   - Sem segredos: o banco e descartavel, criado so para esta execucao, com senha de teste.
 #   - Separado do `pages.yml` (dados e publicacao): este workflow nao publica nada e nao usa o
 #     grupo `pages`.
+#   - Actions e imagem do Postgres fixadas por SHA/digest (tag mutavel nao troca o codigo que roda
+#     aqui); o Dependabot (`.github/dependabot.yml`) propoe a atualizacao das actions.
+#   - PR vindo de fork roda conforme a politica do repositorio (Settings > Actions > "Fork pull
+#     request workflows"); o padrao do GitHub pede aprovacao para quem contribui pela primeira vez.
 
 name: Testes
 
@@ -33,7 +37,8 @@ jobs:
     timeout-minutes: 30
     services:
       postgres:
-        image: postgres:16 # ja traz pg_trgm e unaccent (contrib), usados por sql/extra.sql
+        # digest de postgres:16 em 2026-10-29; traz pg_trgm e unaccent (contrib), usados por sql/extra.sql
+        image: postgres:16@sha256:1beaa3084eee2676f20a9cd9928f0bf2c5bf674f8e49f81017912183d377c61c
         env:
           POSTGRES_USER: plenario
           POSTGRES_PASSWORD: plenario
@@ -48,9 +53,11 @@ jobs:
       DATABASE_URL: postgres://plenario:plenario@localhost:5432/plenario_test
       TEST_DATABASE_URL: postgres://plenario:plenario@localhost:5432/plenario_test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.2.12
 
