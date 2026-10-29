@@ -9,7 +9,8 @@
     "build:pages": "tsc --noEmit && VITE_DADOS=estatico VITE_BASE=/plenario/ vite build",
     "preview": "vite preview",
     "preview:pages": "VITE_BASE=/plenario/ vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
+    "test": "bun test"
   },
   "dependencies": {
     "@plenario/core": "workspace:*",
