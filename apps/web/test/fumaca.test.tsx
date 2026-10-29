@@ -10,6 +10,8 @@ describe("fumaca da infra de teste do web", () => {
     expect(document.body.contains(el)).toBe(true);
   });
 
+  // Os dois `it` abaixo dependem da ordem: o segundo so prova o cleanup do preload porque o primeiro
+  // renderizou o mesmo texto antes. Mantenha-os juntos e nesta ordem (sem `.only` em um so).
   it("cleanup entre testes: o texto de um teste nao sobra no seguinte", () => {
     render(<p>mesmo texto</p>);
     expect(screen.queryAllByText("mesmo texto")).toHaveLength(1);
