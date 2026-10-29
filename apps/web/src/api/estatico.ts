@@ -367,7 +367,12 @@ export const fonteEstatica: Fonte = {
 
   votacao: (id) => buscar<VotacaoDetalhe>(caminhos.votacao(id)),
 
-  proposicao: (id) => buscar<ProposicaoDetalhe>(caminhos.proposicao(id)),
+  // `consulta ?? null`: o site publicado antes da f327 tem proposicao/<id>.json sem o campo; sem
+  // isto a tela leria undefined. Arquivo antigo = sem placar (bloco ausente), não erro.
+  proposicao: async (id) => {
+    const p = await buscar<ProposicaoDetalhe>(caminhos.proposicao(id));
+    return { ...p, consulta: p.consulta ?? null };
+  },
 
   partidos: async () => {
     const contagem = new Map<string, number>();
