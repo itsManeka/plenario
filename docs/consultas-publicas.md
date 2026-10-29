@@ -129,7 +129,10 @@ coletivo dizer o contrário na issue.
    card mostra a mesma leitura que `consulta_publica` guarda. Na mesma transação o ingest apaga os
    outros eventos `consulta_publica` da proposição (`ref_id` fora do canônico, de qualquer
    parlamentar), o que limpa os eventos mensais de antes e o que nasce quando a data de
-   apresentação aparece depois do fallback. O placar atrasa no máximo uma volta do rodízio (decisão
+   apresentação aparece depois do fallback. No início de cada sincronização o ingest também
+   normaliza, só com o que já está no banco, os eventos das proposições que o rodízio ainda não
+   releu: grava o evento canônico a partir da linha mais recente de `consulta_publica` e apaga os
+   demais, na mesma transação; proposição sem primeiro signatário fica sem evento. O placar atrasa no máximo uma volta do rodízio (decisão
    6). O card de consulta fica separado do card da proposição, mesmo caindo no mesmo dia, e a página
    interna da proposição não mostra o placar: o card leva para ela e o link oficial para o
    e-Cidadania.
