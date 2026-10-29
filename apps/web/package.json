@@ -19,7 +19,11 @@
     "react-router": "^7.2.0"
   },
   "devDependencies": {
+    "@happy-dom/global-registrator": "^21.0.4",
     "@tailwindcss/vite": "^4.0.0",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
+    "@types/bun": "^1.4.4",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",
