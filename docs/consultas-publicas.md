@@ -197,7 +197,8 @@ coletivo dizer o contrário na issue.
 **Corpo:**
 
 > Proposta: mostrar no feed o placar das consultas públicas do e-Cidadania, ligado à proposição
-> que já ingerimos do Senado. Antes de qualquer código, preciso saber se o coletivo aceita a fonte.
+> que já ingerimos do Senado. A implementação está pronta no PR que acompanha esta issue; abro a
+> issue para o coletivo decidir as perguntas abaixo antes do merge, a começar por aceitar ou não a fonte.
 >
 > **Fonte.** `www12.senado.leg.br/ecidadania/visualizacaomateria?id=<codigoMateria>`. É página
 > oficial do Senado, mas sem API: o placar está no HTML renderizado no servidor. O `id` é o
