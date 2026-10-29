@@ -1,3 +1,4 @@
+import { urlFonteConsultaValida } from "@plenario/core/fonte";
 import { dataHora, num } from "../lib/format";
 import { FonteLink, VotoSelo } from "./ui";
 
@@ -42,12 +43,15 @@ export function PlacarConsulta({
         Votos apurados até <span className="tabular-nums">{dataHora(apuradoEm)}</span>
       </p>
       <p className="mt-1 text-xs leading-4 text-muted">{AVISO_CONSULTA}</p>
-      <div className={`${linkClassName} mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm`.trim()}>
-        <FonteLink href={urlFonte}>
-          {CTA_CONSULTA}
-          <span className="sr-only"> — site do Senado</span>
-        </FonteLink>
-      </div>
+      {/* Mesma regra da API: no modo estático o arquivo não passa por ela, então o link só sai se a URL valer. */}
+      {urlFonteConsultaValida(urlFonte) && (
+        <div className={`${linkClassName} mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm`.trim()}>
+          <FonteLink href={urlFonte}>
+            {CTA_CONSULTA}
+            <span className="sr-only"> — site do Senado</span>
+          </FonteLink>
+        </div>
+      )}
     </>
   );
 }

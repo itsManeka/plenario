@@ -657,7 +657,8 @@ describe("detalhes", () => {
     expect(body.dataApresentacao).toBe("2026-09-01T12:00:00.000Z");
   });
 
-  test("partidos", async () => {    const { body, res } = await get<{ sigla: string; total: number }[]>("/partidos");
+  test("partidos", async () => {
+    const { body, res } = await get<{ sigla: string; total: number }[]>("/partidos");
     expect(body[0]).toEqual({ sigla: "PT", total: 3 });
     expect(res.headers.get("cache-control")).toContain("max-age=60");
   });

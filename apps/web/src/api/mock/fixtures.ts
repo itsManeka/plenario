@@ -368,9 +368,9 @@ const comAutor = (
 });
 
 const autorDoPerfil = proponente(senadoEm(3));
-const consultas: { prop: ProposicaoDetalhe; dias: number; sim: number; nao: number }[] = [
+const consultas: { prop: ProposicaoDetalhe; dias: number; sim: number; nao: number; urlInvalida?: true }[] = [
   { prop: senadoEm(0), dias: 4, sim: 412876, nao: 198043 }, // números grandes (overflow e pt-BR)
-  { prop: senadoEm(1), dias: 9, sim: 37, nao: 12 }, // números pequenos
+  { prop: senadoEm(1), dias: 9, sim: 37, nao: 12, urlInvalida: true }, // números pequenos; url http: = placar sem link
   { prop: senadoEm(2), dias: 20, sim: 0, nao: 58 }, // zero no Sim
   // dois do mesmo autor, para o filtro "Consultas" no Perfil
   { prop: comAutor(senadoEm(3), "senado:3900101", 1101, autorDoPerfil), dias: 2, sim: 5120, nao: 1877 },
@@ -378,7 +378,8 @@ const consultas: { prop: ProposicaoDetalhe; dias: number; sim: number; nao: numb
 ];
 for (const c of consultas) {
   const apuradoEm = instanteConsulta(c.dias);
-  const urlFonte = `https://example.org/senado/consulta/${c.prop.id.split(":")[1]}`;
+  // host oficial: o PlacarConsulta só mostra o link se a url passar em urlFonteConsultaValida
+  const urlFonte = `${c.urlInvalida ? "http" : "https"}://www12.senado.leg.br/ecidadania/visualizacaomateria?id=${c.prop.id.split(":")[1]}`;
   // placar também na página da proposição (senadoEm(3) e as demais sem consulta ficam com null)
   c.prop.consulta = { votosSim: c.sim, votosNao: c.nao, apuradoEm, urlFonte };
   feed.push({

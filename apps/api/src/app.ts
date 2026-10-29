@@ -312,7 +312,7 @@ app.get("/proposicoes/:id", async (c) => {
       select votos_sim, votos_nao, url_fonte,
              to_char(apurado_em at time zone 'UTC', ${FMT_ISO}) as apurado_em
       from consulta_publica where proposicao_id = ${id}
-      order by apurado_em desc limit 1`,
+      order by consulta_publica.apurado_em desc limit 1`,
   ]);
 
   const corpo: ProposicaoDetalhe = {

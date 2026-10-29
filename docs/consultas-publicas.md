@@ -139,9 +139,13 @@ coletivo dizer o contrário na issue.
    página podem divergir por pouco tempo, entre a releitura de `consulta_publica` e a normalização
    do evento; a diferença é aceita. A página mostra o mesmo aviso e o mesmo link oficial do card,
    vindos do componente `PlacarConsulta` (`apps/web`), que é a fonte única de `AVISO_CONSULTA` e
-   `CTA_CONSULTA`. Sem leitura, a página não tem bloco de consulta. O link oficial desse card tem o texto "Opine no e-Cidadania" (nome acessível
-   "Opine no e-Cidadania — site do Senado (abre em nova aba)"): verbo do próprio site, sem
-   sugerir lado. Os demais cards seguem com "Fonte oficial".
+   `CTA_CONSULTA`. Sem leitura, a página não tem bloco de consulta.
+
+   O link oficial desse card tem o texto "Opine no e-Cidadania" (nome acessível "Opine no
+   e-Cidadania — site do Senado (abre em nova aba)"): verbo do próprio site, sem sugerir lado.
+   O `PlacarConsulta` só mostra o link quando `urlFonte` passa em `urlFonteConsultaValida`
+   (`@plenario/core/fonte`), a mesma regra da API; no modo estático o arquivo não passa pela API.
+   Os demais cards seguem com "Fonte oficial".
 4. **Aviso fixo (texto exato):**
    > Enquete aberta no e-Cidadania: cada pessoa cadastrada vota uma vez. Não representa a população.
 5. **Elegibilidade:** proposições do Senado já ingeridas (`proposicao`, `casa = 'senado'`). A tabela
