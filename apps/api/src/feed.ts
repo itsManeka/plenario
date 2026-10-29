@@ -1,5 +1,6 @@
 import { sql } from "@plenario/core/db";
 import type { FeedItem, FeedItemTipo, Pagina, VotoTipo } from "@plenario/core/api";
+import { urlFonteConsultaValida } from "@plenario/core/fonte";
 import {
   codificarCursor,
   comOPartido,
@@ -21,6 +22,8 @@ import {
 } from "./util";
 
 export const TAMANHO_PAGINA = 30;
+// teto do parametro `tipos` (os 4 tipos juntos somam ~45 caracteres)
+const MAX_TIPOS_CHARS = 200;
 const TIPOS: readonly FeedItemTipo[] = ["voto", "proposicao", "despesa_mensal", "consulta_publica"];
 
 // ref_id de consulta_publica: "<proposicao_id>:<AAAA-MM>". O proposicao_id tem ":" ("senado:123"),
@@ -53,6 +56,8 @@ export function lerResumoConsulta(resumo: unknown): ResumoConsulta | null {
 
 export function validarTipos(v: string | undefined): FeedItemTipo[] | null {
   if (v === undefined || v.trim() === "") return null;
+  // teto antes do split: a mensagem nao ecoa o valor (um tipos enorme nao vira corpo de erro)
+  if (v.length > MAX_TIPOS_CHARS) throw erro400(`tipos muito longo (maximo ${MAX_TIPOS_CHARS} caracteres)`);
   const tipos = [...new Set(v.split(",").map((s) => s.trim()).filter(Boolean))];
   for (const t of tipos) {
     if (!(TIPOS as readonly string[]).includes(t)) throw erro400(`tipo inválido: ${t} (use ${TIPOS.join(", ")})`);
@@ -299,7 +304,8 @@ async function montarItens(eventos: LinhaEvento[]): Promise<FeedItem[]> {
       if (!c) continue;
       const proposicao = propPorId.get(c.ref.proposicaoId);
       const urlFonte = consultaUrlPor.get(c.ref.proposicaoId);
-      if (!proposicao || !urlFonte) continue;
+      // url fora do host/esquema oficial = evento omitido (mesma regra do ingest e do export)
+      if (!proposicao || !urlFonte || !urlFonteConsultaValida(urlFonte)) continue;
       itens.push({
         ...base,
         urlFonte,

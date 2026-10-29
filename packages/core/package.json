@@ -7,6 +7,7 @@
     "./api": "./src/api.ts",
     "./db": "./src/db.ts",
     "./texto": "./src/texto.ts",
+    "./fonte": "./src/fonte.ts",
     "./estatico": "./src/estatico.ts"
   },
   "scripts": {

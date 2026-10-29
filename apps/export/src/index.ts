@@ -8,6 +8,7 @@
 import { mkdir, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { sql } from "@plenario/core/db";
+import { urlFonteConsultaValida } from "@plenario/core/fonte";
 import { normalizarBusca } from "@plenario/core/texto";
 import type { Casa, Health, VotacaoResumo, VotoTipo } from "@plenario/core/api";
 import {
@@ -326,7 +327,7 @@ function hidratadorConsulta(parls: Map<string, Parl>): Hidratador {
              e.ref_id, e.resumo, c.url_fonte,
              p.id, p.casa, p.sigla_tipo, p.numero, p.ano, p.ementa, p.url
       from evento e
-      join proposicao p on p.id = substring(e.ref_id from '^(.+):[0-9]{4}-[0-9]{2}$')
+      join proposicao p on p.id = substring(e.ref_id from '^(.+):[0-9]{4}-(?:0[1-9]|1[0-2])$')
       join (
         select distinct on (proposicao_id) proposicao_id, url_fonte
         from consulta_publica
@@ -340,7 +341,8 @@ function hidratadorConsulta(parls: Map<string, Parl>): Hidratador {
         // mesma regra da API: ref_id fora do padrão ou resumo malformado = evento omitido
         if (!parseRefIdConsulta(r.ref_id)) continue;
         const resumo = lerResumoConsulta(r.resumo);
-        if (!resumo || !r.url_fonte) continue;
+        // url fora do host/esquema oficial = evento omitido (mesma regra da API)
+        if (!resumo || !urlFonteConsultaValida(r.url_fonte)) continue;
         yield {
           parlamentarId: r.parlamentar_id,
           item: {

@@ -2,6 +2,7 @@
  * Regras puras do sync das consultas publicas (sem I/O, sem banco). Decisoes: docs/consultas-publicas.md
  * (D2 primeiro signatario, D3 ref_id por mes em America/Sao_Paulo, D5/D6 selecao e pulo).
  */
+import { HOST_FONTE, urlFonteConsultaValida } from "@plenario/core/fonte";
 import type { RespostaTexto } from "../http";
 import { urlConsulta, type ResultadoConsulta } from "./consulta_parser";
 
@@ -37,23 +38,11 @@ export interface Leitura {
 
 export type ValidacaoLeitura = { ok: true; leitura: Leitura } | { ok: false; motivo: string };
 
-const HOST_FONTE = "www12.senado.leg.br";
-
-function urlFonteValida(urlFonte: string): boolean {
-  let u: URL;
-  try {
-    u = new URL(urlFonte);
-  } catch {
-    return false;
-  }
-  return u.protocol === "https:" && u.host === HOST_FONTE && u.username === "" && u.password === "";
-}
-
 const contagemValida = (n: number): boolean => Number.isSafeInteger(n) && n >= 0;
 
 export function validarLeitura(l: Leitura): ValidacaoLeitura {
   if (!Number.isSafeInteger(l.cod) || l.cod <= 0) return { ok: false, motivo: "codigo invalido" };
-  if (!urlFonteValida(l.urlFonte)) return { ok: false, motivo: "url_fonte fora de https://" + HOST_FONTE };
+  if (!urlFonteConsultaValida(l.urlFonte)) return { ok: false, motivo: "url_fonte fora de https://" + HOST_FONTE };
   if (!contagemValida(l.votosSim)) return { ok: false, motivo: "votosSim invalido" };
   if (!contagemValida(l.votosNao)) return { ok: false, motivo: "votosNao invalido" };
   if (!(l.apuradoEm instanceof Date) || Number.isNaN(l.apuradoEm.getTime())) {

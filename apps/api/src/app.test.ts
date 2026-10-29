@@ -11,6 +11,7 @@ const { app } = await import("./app");
 const { sql } = await import("@plenario/core/db");
 const { normalizarBusca } = await import("@plenario/core/texto");
 const { urlCotaCamara } = await import("./util");
+const { TAMANHO_PAGINA } = await import("./feed");
 
 async function get<T>(path: string): Promise<{ status: number; body: T; res: Response }> {
   const res = await app.request(path);
@@ -529,12 +530,14 @@ describe("feed consulta_publica", () => {
 
   test("C85: evento omitido no meio e no fim da pagina nao repete nem trava o cursor", async () => {
     const legados: string[] = [];
+    // índices k dos eventos legados do seed; a base (idConsultaBase) é a 1ª linha crua, então o k de
+    // índice TAMANHO_PAGINA - 2 é a última linha crua da primeira página
+    const LEGADOS_K = [9, TAMANHO_PAGINA - 2];
     try {
       let valido = 0;
       for (let k = 0; k < 37; k++) {
         const quando = new Date(Date.UTC(2026, 6, 1, 12, 0) - k * 60_000).toISOString();
-        if (k === 9 || k === 28) {
-          // k = 28 é o 30º evento cru: o último da primeira página
+        if (LEGADOS_K.includes(k)) {
           legados.push(await semearEvento("camara:2", quando, k === 9 ? "2026-07" : "2026-06", RESUMO_OK));
         } else {
           await semearProposicaoConsulta(String(valido));
@@ -546,12 +549,32 @@ describe("feed consulta_publica", () => {
       expect(todos.length).toBe(38);
       const esperado = todos.filter((id) => !legados.includes(id));
       const { ids, paginas } = await percorrer("/feed?tipos=consulta_publica");
-      expect(paginas[0]!.itens.length).toBe(28);
+      // a 1ª página tem TAMANHO_PAGINA linhas cruas, a base entre elas; cada legado nela some do card
+      const legadosNaPrimeira = LEGADOS_K.filter((k) => k < TAMANHO_PAGINA - 1).length;
+      expect(paginas[0]!.itens.length).toBe(TAMANHO_PAGINA - legadosNaPrimeira);
       expect(paginas[0]!.proximo).not.toBeNull();
       expect(ids).toEqual(esperado);
       expect(new Set(ids).size).toBe(ids.length);
     } finally {
       await apagarEventos(legados);
+      await limparSemeadas();
+    }
+  });
+
+  test("url_fonte fora de https no host oficial (javascript:) omite o evento do feed", async () => {
+    let id = "";
+    try {
+      await sql`insert into proposicao (id, casa, id_externo, sigla_tipo, numero, ano) values ('camara:cpjs', 'camara', 'cpjs', 'PL', 78, 2026)`;
+      await sql`insert into consulta_publica (materia_cod, proposicao_id, votos_sim, votos_nao, apurado_em, url_fonte) values
+        ('cpjs1', 'camara:cpjs', 4, 2, '2026-09-20T00:00:00Z', 'javascript:alert(1)')`;
+      id = await semearEvento("camara:2", "2026-09-27T12:00:00Z", "camara:cpjs:2026-09", RESUMO_OK);
+      const ids = await idsFeed("/feed?tipos=consulta_publica");
+      expect(ids).not.toContain(id);
+      expect(ids).toContain(idConsultaBase);
+      const itens = await itensConsulta("/feed?tipos=consulta_publica");
+      expect(itens.every((i) => i.urlFonte.startsWith("https://www12.senado.leg.br/"))).toBe(true);
+    } finally {
+      await apagarEventos(id ? [id] : []);
       await limparSemeadas();
     }
   });
@@ -642,6 +665,17 @@ describe("detalhes", () => {
 });
 
 describe("erros", () => {
+  test("tipos com mais de 200 caracteres responde 400 sem ecoar o valor; 200 exatos passam", async () => {
+    const longo = "voto,".repeat(40) + "v"; // 201 caracteres
+    const r = await app.request(`/feed?tipos=${longo}`);
+    expect(r.status).toBe(400);
+    const corpo = await r.text();
+    expect(corpo).not.toContain("voto,voto");
+    expect(corpo).toContain("tipos muito longo");
+    const teto = await app.request(`/feed?tipos=${"voto,".repeat(40)}`); // 200 caracteres, dedupe em voto
+    expect(teto.status).toBe(200);
+  });
+
   test("404 para ids inexistentes", async () => {
     for (const p of ["/parlamentares/camara:999", "/parlamentares/camara:999/feed", "/votacoes/camara:nada", "/proposicoes/senado:0", "/nao-existe"]) {
       const { status, body, res } = await get<{ erro: string }>(p);
