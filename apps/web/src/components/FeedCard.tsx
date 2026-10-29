@@ -1,5 +1,6 @@
 import type {
   FeedItem,
+  FeedItemConsulta,
   FeedItemDespesaMensal,
   FeedItemProposicao,
   FeedItemVoto,
@@ -13,6 +14,7 @@ import {
   brl,
   CASA_NOME,
   categoriaDespesa,
+  dataHora,
   mesAno,
   mesCorrente,
   NOTA_PASSAGEM,
@@ -21,7 +23,7 @@ import {
   semPassagemAerea,
   partidoUf,
 } from "../lib/format";
-import { IconeDiferente, IconeIgual, IconePredio } from "./Icones";
+import { IconeDiferente, IconeIgual, IconeNao, IconePredio, IconeSim } from "./Icones";
 import { Avatar, Etiqueta, FonteLink, Tempo, VotoSelo } from "./ui";
 
 export function hrefParlamentar(id: string) {
@@ -249,10 +251,74 @@ export function FeedCard({ item }: { item: FeedItem }) {
       return <CardProposicao item={item} />;
     case "despesa_mensal":
       return <CardDespesa item={item} />;
-    // provisorio: CardConsulta entra em f06
     case "consulta_publica":
-      return null;
+      return <CardConsulta item={item} />;
   }
+}
+
+const AVISO_CONSULTA =
+  "Enquete aberta no e-Cidadania: cada pessoa cadastrada vota uma vez. Não representa a população.";
+
+/**
+ * Consulta pública do e-Cidadania (Senado): quem votou foi o público, então o card é do tipo
+ * "prédio", com o autor citado no corpo. Texto neutro: só os totais, sem percentual nem barra.
+ */
+function CardConsulta({ item }: { item: FeedItemConsulta }) {
+  const pr = item.proposicao;
+  const p = item.parlamentar;
+  return (
+    <article className="relative flex gap-3 border-b border-line px-4 py-3.5 transition-colors has-[.stretched:hover]:bg-sunken/60 has-[.stretched:focus-visible]:bg-sunken/60">
+      <span
+        aria-hidden="true"
+        className="grid size-11 shrink-0 place-items-center self-start rounded-full border border-line bg-sunken text-muted"
+      >
+        <IconePredio tamanho={20} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm leading-5 text-muted">
+          Consulta pública · {CASA_NOME[pr.casa]} · <Tempo iso={item.ocorridoEm} />
+        </p>
+        <p className="mt-1 text-[15px] leading-6 text-ink">
+          Consulta pública sobre{" "}
+          <Link to={hrefProposicao(pr.id)} className="stretched font-semibold hover:underline">
+            {pr.rotulo}
+          </Link>
+        </p>
+        {pr.ementa && <p className="mt-1 line-clamp-3 text-sm leading-5 text-ink-2">{pr.ementa}</p>}
+        <p className="mt-1 text-sm leading-5 text-muted">
+          Autoria:{" "}
+          <Link
+            to={hrefParlamentar(p.id)}
+            className="above-stretch font-medium text-ink-2 hover:underline"
+          >
+            {p.nome}
+          </Link>{" "}
+          ({partidoUf(p)})
+        </p>
+        <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+          <li className="inline-flex items-center gap-1.5 tabular-nums text-ink">
+            <IconeSim tamanho={16} />
+            <span>
+              Sim: <span className="font-semibold">{num(item.votosSim)}</span>
+            </span>
+          </li>
+          <li className="inline-flex items-center gap-1.5 tabular-nums text-ink">
+            <IconeNao tamanho={16} />
+            <span>
+              Não: <span className="font-semibold">{num(item.votosNao)}</span>
+            </span>
+          </li>
+        </ul>
+        <p className="mt-1.5 text-sm text-muted">
+          Votos apurados até <span className="tabular-nums">{dataHora(item.apuradoEm)}</span>
+        </p>
+        <p className="mt-1 text-xs leading-4 text-muted">{AVISO_CONSULTA}</p>
+        <div className="above-stretch mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm">
+          <FonteLink href={item.urlFonte} />
+        </div>
+      </div>
+    </article>
+  );
 }
 
 const VISIVEIS_GRUPO = 6;

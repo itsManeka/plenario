@@ -88,8 +88,11 @@ function buscar<T>(caminho: string): Promise<T> {
   return p as Promise<T>;
 }
 
-// Fluxo de consulta pode não existir no site já publicado (export anterior à feature): 404 nele
-// vira página vazia. Só para esse tipo; erro de download não vai para o cache (buscar já apaga).
+// 2026-10-28: tolerância transitória a 404 do fluxo consulta_publica. Existe porque o export já
+// publicado no site é anterior a esse fluxo, então o arquivo pode não existir: 404 nele vira página
+// vazia. Só para esse tipo; erro de download não vai para o cache (buscar já apaga).
+// Remover quando o export com consulta_publica estiver publicado no site: apagar o campo tolerante404
+// de Fluxo, suas duas montagens e o ramo de 404 em paginaDo.
 async function paginaDo(f: Fluxo, pagina: number): Promise<PaginaFeed> {
   try {
     return await buscar<PaginaFeed>(f.arquivo(pagina));

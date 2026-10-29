@@ -334,6 +334,51 @@ for (const p of parlamentares.filter((x) => x.casa === "camara")) {
   }
 }
 
+// ---- consultas públicas (e-Cidadania) ----
+// Sem sorteio: não desloca a semente dos dados acima. Proposições do Senado; o autor é o proponente.
+// Enquete aberta (cada pessoa cadastrada vota uma vez): o mock só traz os totais, sem juízo.
+const senado = proposicoes.filter((p) => p.casa === "senado");
+const instanteConsulta = (diasAtras: number): string =>
+  new Date(AGORA - diasAtras * DIA - 3_600_000).toISOString();
+const proponente = (p: ProposicaoDetalhe) => p.autores[0]!.parlamentar;
+const comAutor = (
+  base: ProposicaoDetalhe,
+  id: string,
+  numero: number,
+  autor: ReturnType<typeof resumo>,
+): ProposicaoDetalhe => ({
+  ...base,
+  id,
+  numero,
+  rotulo: `${base.siglaTipo} ${numero}/${base.ano}`,
+  url: `https://example.org/senado/proposicao/${id.split(":")[1]}`,
+  autores: [{ parlamentar: autor, proponente: true, ordem: 1 }],
+});
+
+const autorDoPerfil = proponente(senado[3]!);
+const consultas: { prop: ProposicaoDetalhe; dias: number; sim: number; nao: number }[] = [
+  { prop: senado[0]!, dias: 4, sim: 412876, nao: 198043 }, // números grandes (overflow e pt-BR)
+  { prop: senado[1]!, dias: 9, sim: 37, nao: 12 }, // números pequenos
+  { prop: senado[2]!, dias: 20, sim: 0, nao: 58 }, // zero no Sim
+  // dois do mesmo autor, para o filtro "Consultas" no Perfil
+  { prop: comAutor(senado[3]!, "senado:3900101", 1101, autorDoPerfil), dias: 2, sim: 5120, nao: 1877 },
+  { prop: comAutor(senado[3]!, "senado:3900102", 1102, autorDoPerfil), dias: 13, sim: 301, nao: 0 },
+];
+for (const c of consultas) {
+  const apuradoEm = instanteConsulta(c.dias);
+  feed.push({
+    id: String(seq++),
+    tipo: "consulta_publica",
+    ocorridoEm: apuradoEm,
+    parlamentar: proponente(c.prop),
+    proposicao: proposicaoResumo(c.prop),
+    votosSim: c.sim,
+    votosNao: c.nao,
+    apuradoEm,
+    urlFonte: `https://example.org/senado/consulta/${c.prop.id.split(":")[1]}`,
+  });
+}
+
 feed.sort((a, b) =>
   a.ocorridoEm === b.ocorridoEm ? Number(b.id) - Number(a.id) : a.ocorridoEm < b.ocorridoEm ? 1 : -1,
 );
